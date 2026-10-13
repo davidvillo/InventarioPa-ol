@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Hammer and pickaxe stay inside the adaptive icon safe area. -->
+    <path android:pathData="M66,41 L35,73"
+        android:fillColor="#00000000" android:strokeColor="#FFC15A"
+        android:strokeWidth="7.5" android:strokeLineCap="round" />
+    <path android:pathData="M41,67 L35,73"
+        android:fillColor="#00000000" android:strokeColor="#E79A30"
+        android:strokeWidth="7.5" android:strokeLineCap="round" />
+    <path android:pathData="M44,44 L72,73"
+        android:fillColor="#00000000" android:strokeColor="#FFC15A"
+        android:strokeWidth="7.5" android:strokeLineCap="round" />
+    <path android:pathData="M66,67 L72,73"
+        android:fillColor="#00000000" android:strokeColor="#E79A30"
+        android:strokeWidth="7.5" android:strokeLineCap="round" />
+    <path android:pathData="M52,32 C67,29 80,41 79,53 C73,44 63,39 52,37 Z"
+        android:fillColor="#F3F7FC" />
+    <path android:pathData="M52,35 C64,35 74,43 79,53 C73,44 63,39 52,37 Z"
+        android:fillColor="#C9DFEE" />
+    <path android:pathData="M29,46 L45,30 L52,37 L36,53 Z"
+        android:fillColor="#F3F7FC" />
+    <path android:pathData="M33,50 L49,34 L52,37 L36,53 Z"
+        android:fillColor="#C9DFEE" />
+</vector>
