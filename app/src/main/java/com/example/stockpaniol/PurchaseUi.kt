@@ -101,6 +101,7 @@ fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(purchase.itemName, fontWeight = FontWeight.Bold)
+                            if (purchase.identitySummary.isNotBlank()) Text(purchase.identitySummary)
                             Text("Fecha: ${displayStockDate(purchase.date)}")
                             Text("${formatStockQuantity(purchase.quantity)} ${purchase.unit}")
                             Text("Empresa: ${purchase.company.ifBlank { "—" }}")

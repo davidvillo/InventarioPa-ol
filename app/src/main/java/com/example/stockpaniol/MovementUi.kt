@@ -80,6 +80,8 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
     var selectedId by rememberSaveable { mutableLongStateOf(initialId) }
     var workerId by rememberSaveable { mutableLongStateOf(0L) }
     var quantity by rememberSaveable { mutableStateOf("") }
+    var selectedUnits by rememberSaveable { mutableStateOf(longArrayOf()) }
+    var editUnit by remember { mutableStateOf<InventoryUnit?>(null) }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable { mutableStateOf("") }
     var tab by rememberSaveable { mutableIntStateOf(1) }
@@ -107,16 +109,32 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
                 selected?.let {
                     Text("Disponible: ${formatStockQuantity(it.quantity)} ${it.unit}")
                     if (!tools) Text("Tipo: ${it.materialType}")
-                    if (tools) { Text("Marca: ${it.brand.ifBlank { "—" }}"); Text("Empresa: ${it.company.ifBlank { "—" }}") }
+                    if (tools) { Text("Marcas: ${it.units.map { u -> u.brand }.filter { b -> b.isNotBlank() }.distinct().joinToString(", ").ifBlank { "—" }}"); Text("Empresa: ${it.company.ifBlank { "—" }}") }
                     Text("Observaciones: ${it.notes.ifBlank { "—" }}")
+                    if (it.individuallyTracked) {
+                        Text("Unidades identificadas", fontWeight = FontWeight.Bold)
+                        it.units.forEach { unit ->
+                            Text("${unit.label} · ${if (unit.available) "En pañol" else "Prestada a ${unit.holder}"}")
+                            if (unit.legacy) Text("Unidad de stock anterior: verificá marca y etiqueta.", style = MaterialTheme.typography.bodySmall)
+                            TextButton(enabled = !busy, onClick = { editUnit = unit }) { Text("Editar marca / identificador") }
+                        }
+                    }
                 }
             } else {
                 StockChoice(if (tools) "Herramienta" else "Material", selected?.name.orEmpty(), records.map { it.id.toString() to "${it.name} · ${formatStockQuantity(it.quantity)} ${it.unit}" }, !busy) {
-                    selectedId = it.toLong(); quantity = ""; error = ""
+                    selectedId = it.toLong(); quantity = ""; selectedUnits = longArrayOf(); error = ""
                 }
                 Text("Disponible: ${formatStockQuantity(selected?.quantity ?: 0.0)} ${selected?.unit.orEmpty()}")
-                OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad (${selected?.unit.orEmpty()})") },
-                    keyboardOptions = KeyboardOptions(keyboardType = if (selected?.unit == "unidades") KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+                if (selected?.individuallyTracked == true) {
+                    Text("Marcá cuáles se entregan", fontWeight = FontWeight.Bold)
+                    selected.availableUnits.forEach { unit ->
+                        UnitSelection(unit.label + if (unit.legacy) " · Verificar etiqueta histórica" else "", unit.id in selectedUnits, !busy) {
+                            selectedUnits = if (unit.id in selectedUnits) selectedUnits.filter { it != unit.id }.toLongArray() else selectedUnits + unit.id
+                        }
+                    }
+                    Text("Cantidad seleccionada: ${selectedUnits.size}")
+                } else OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad (${selected?.unit.orEmpty()})") },
+                    keyboardOptions = KeyboardOptions(keyboardType = if (selected?.wholeNumbers == true) KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
                 StockDateField("Fecha del movimiento", date, !busy) { date = it }
                 StockChoice("Personal que recibe", workers.firstOrNull { it.id == workerId }?.selectionLabel.orEmpty(), workers.map { it.id.toString() to it.selectionLabel }, !busy) { workerId = it.toLong() }
                 TextButton(enabled = !busy, onClick = { personal = true }) { Text("Agregar personal de obra") }
@@ -128,17 +146,17 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cerrar") }
             if (tab == 1) Button(enabled = !busy && !loading && selected != null, onClick = {
-                val number = quantity.trim().replace(',', '.').toDoubleOrNull()
+                val number = if (selected?.individuallyTracked == true) selectedUnits.size.toDouble() else quantity.trim().replace(',', '.').toDoubleOrNull()
                 error = runCatching {
                     require(number != null) { "Ingresá una cantidad válida." }
-                    validateMovementQuantity(number, selected!!.unit)
+                    validateMovementQuantity(number, selected!!.unit, selected.wholeNumbers)
                     require(number <= selected.quantity) { "La cantidad supera el stock disponible (${formatStockQuantity(selected.quantity)} ${selected.unit})." }
                     require(workerId != 0L) { "Seleccioná la persona que recibe." }
                 }.exceptionOrNull()?.message.orEmpty()
                 if (error.isBlank() && number != null) {
                     busy = true
                     scope.launch {
-                        val result = withContext(Dispatchers.IO) { runCatching { repository.issue(tools, selectedId, number, date, workerId, notes) } }
+                        val result = withContext(Dispatchers.IO) { runCatching { repository.issue(tools, selectedId, number, date, workerId, notes, selectedUnits.toList()) } }
                         busy = false
                         result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudo guardar el egreso."; revision++ }
                     }
@@ -147,70 +165,51 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
         }
     }
     if (personal) PersonnelDialog(repository, { personal = false; revision++ })
+    editUnit?.let { unit ->
+        IdentifyUnitDialog(tools, unit, repository, { editUnit = null }, { editUnit = null; revision++ })
+    }
 }
 
 @Composable
-fun PersonnelDialog(repository: StockRepository, onDismiss: () -> Unit) {
+private fun UnitSelection(label: String, selected: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(selected, { onToggle() }, enabled = enabled)
+        Text(label, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun IdentifyUnitDialog(tools: Boolean, unit: InventoryUnit, repository: StockRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var workers by remember { mutableStateOf(emptyList<Worker>()) }
-    var name by rememberSaveable { mutableStateOf("") }
-    var surname by rememberSaveable { mutableStateOf("") }
-    var worksite by rememberSaveable { mutableStateOf("") }
-    var nickname by rememberSaveable { mutableStateOf("") }
-    var search by rememberSaveable { mutableStateOf("") }
-    var form by rememberSaveable { mutableStateOf(false) }
+    var brand by rememberSaveable(unit.id) { mutableStateOf(unit.brand) }
+    var identifier by rememberSaveable(unit.id) { mutableStateOf(unit.identifier) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
-    var revision by remember { mutableIntStateOf(0) }
-    LaunchedEffect(revision) {
-        runCatching { withContext(Dispatchers.IO) { repository.personnel() } }.onSuccess { workers = it }.onFailure { error = "No se pudo cargar el personal." }
-    }
-    StockOverlay({ if (!busy) onDismiss() }) {
-        Text("Personal de obra", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        if (form) {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(name, { name = it }, enabled = !busy, label = { Text("Nombre *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(surname, { surname = it }, enabled = !busy, label = { Text("Apellido *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(worksite, { worksite = it }, enabled = !busy, label = { Text("Obra *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(nickname, { nickname = it }, enabled = !busy, label = { Text("Apodo") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(enabled = !busy, onClick = { form = false; error = "" }) { Text("Cancelar") }
-                Button(enabled = !busy, onClick = {
-                    busy = true
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) { runCatching { repository.addWorker(name, surname, worksite, nickname) } }
-                        busy = false
-                        result.onSuccess { name = ""; surname = ""; worksite = ""; nickname = ""; form = false; error = ""; revision++ }
-                            .onFailure { error = it.message ?: "No se pudo guardar el personal." }
-                    }
-                }) { Text(if (busy) "Guardando…" else "Guardar personal") }
-            }
-        } else {
-            OutlinedTextField(search, { search = it }, label = { Text("Buscar nombre, apodo u obra") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Identificar unidad") }, text = {
+        Column {
+            OutlinedTextField(brand, { brand = it }, enabled = !busy, label = { Text("Marca") })
+            OutlinedTextField(identifier, { identifier = it }, enabled = !busy, label = { Text("Identificador único") })
+            Text("Los movimientos anteriores conservan la identificación registrada al realizarlos.", style = MaterialTheme.typography.bodySmall)
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
-                items(workers.filter { it.selectionLabel.contains(search, true) }, key = { it.id }) { worker ->
-                    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) { Text(worker.displayName, fontWeight = FontWeight.SemiBold); Text("Obra: ${worker.worksite}") } }
-                }
-                if (workers.isEmpty()) item { Text("Todavía no hay personal registrado.") }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss) { Text("Cerrar") }
-                Button(onClick = { form = true }) { Text("Agregar personal") }
-            }
         }
-    }
+    }, confirmButton = { TextButton(enabled = !busy, onClick = {
+        busy = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { repository.identifyUnit(tools, unit.id, brand, identifier) } }
+            busy = false
+            result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudo identificar la unidad." }
+        }
+    }) { Text("Guardar") } }, dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancelar") } })
 }
 
 enum class MovementColumn(val label: String, val width: Int, val numeric: Boolean = false) {
     DATE("Fecha de movimiento", 320), ITEM("Artículo", 180), PERSON("Personal", 210), QUANTITY("Cantidad", 110, true),
-    UNIT("Unidad", 100), KIND("Tipo de movimiento", 160), MATERIAL("Tipo de material", 180),
+    UNIT("Unidad", 100), IDENTITY("Marca / identificador", 280), KIND("Tipo de movimiento", 160), MATERIAL("Tipo de material", 180),
     RETURN_DATE("Fecha de devolución", 320), RETURNED("Devueltas", 110, true), PENDING("Pendientes", 110, true), NOTES("Observaciones", 240);
     fun text(m: StockMovement): String = when (this) {
         DATE -> m.date; ITEM -> m.itemName; PERSON -> m.person; QUANTITY -> formatStockQuantity(m.quantity)
         UNIT -> m.unit; KIND -> m.kind; MATERIAL -> m.materialType; RETURN_DATE -> m.returnDate
+        IDENTITY -> m.identitySummary
         RETURNED -> if (m.kind == "Egreso") formatStockQuantity(m.returned) else "—"
         PENDING -> if (m.kind == "Egreso") formatStockQuantity(m.pending) else "—"
         NOTES -> m.notes
@@ -325,6 +324,7 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(movement.itemName, fontWeight = FontWeight.Bold)
+                                if (movement.identitySummary.isNotBlank()) Text(movement.identitySummary)
                                 Text("${movement.kind} · ${displayStockDate(movement.date)}")
                                 Text(movement.person.ifBlank { "Sin personal (ingreso)" })
                                 Text("${formatStockQuantity(movement.quantity)} ${movement.unit}")
@@ -367,12 +367,13 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
     var workers by remember { mutableStateOf(emptyList<Worker>()) }
     var workerId by rememberSaveable { mutableStateOf(movement.workerId ?: 0L) }
     var quantity by rememberSaveable { mutableStateOf("") }
+    var selectedUnits by rememberSaveable { mutableStateOf(longArrayOf()) }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
-        if (!tools) runCatching { withContext(Dispatchers.IO) { repository.personnel() } }.onSuccess { workers = it }.onFailure { error = "No se pudo cargar el personal." }
+        if (!tools) runCatching { withContext(Dispatchers.IO) { repository.personnel(true).filter { it.active || it.id == movement.workerId } } }.onSuccess { workers = it }.onFailure { error = "No se pudo cargar el personal." }
     }
     val canReturn = movement.kind == "Egreso" && movement.pending > 0
     StockOverlay({ if (!busy) onDismiss() }) {
@@ -380,6 +381,8 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("${movement.kind} del ${displayStockDate(movement.date)}")
             Text("Personal: ${movement.person.ifBlank { "—" }}")
+            if (movement.identitySummary.isNotBlank()) Text(movement.identitySummary)
+            if (movement.units.any { it.unit.legacy }) Text("Préstamo anterior a la identificación individual: los códigos son provisionales y no confirman qué ejemplar se entregó. Verificá la unidad física.", style = MaterialTheme.typography.bodySmall)
             Text("Cantidad: ${formatStockQuantity(movement.quantity)} ${movement.unit}")
             if (!tools) Text("Tipo: ${movement.materialType}")
             if (movement.notes.isNotBlank()) Text("Observaciones: ${movement.notes}")
@@ -391,8 +394,16 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
             if (canReturn) {
                 Text("Cargar devolución", style = MaterialTheme.typography.titleMedium)
                 if (!tools) StockChoice("Persona que devuelve", workers.firstOrNull { it.id == workerId }?.selectionLabel.orEmpty(), workers.map { it.id.toString() to it.selectionLabel }, !busy) { workerId = it.toLong() }
-                OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad a devolver (${movement.unit})") },
-                    keyboardOptions = KeyboardOptions(keyboardType = if (movement.unit == "unidades") KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+                if (movement.individuallyTracked) {
+                    Text("Marcá cuáles vuelven al pañol", fontWeight = FontWeight.Bold)
+                    movement.units.filter { !it.returned }.forEach { entry ->
+                        UnitSelection(entry.unit.label, entry.unit.id in selectedUnits, !busy) {
+                            selectedUnits = if (entry.unit.id in selectedUnits) selectedUnits.filter { it != entry.unit.id }.toLongArray() else selectedUnits + entry.unit.id
+                        }
+                    }
+                    Text("Cantidad seleccionada: ${selectedUnits.size}")
+                } else OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad a devolver (${movement.unit})") },
+                    keyboardOptions = KeyboardOptions(keyboardType = if (movement.wholeNumbers) KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
                 StockDateField("Fecha de devolución", date, !busy) { date = it }
                 if (!tools) OutlinedTextField(notes, { notes = it }, enabled = !busy, label = { Text("Observaciones de devolución") }, modifier = Modifier.fillMaxWidth())
             } else Text(if (movement.kind == "Egreso") "Devolución completa." else "Las devoluciones se cargan desde el egreso correspondiente.")
@@ -401,16 +412,16 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cerrar") }
             if (canReturn) Button(enabled = !busy, onClick = {
-                val number = quantity.trim().replace(',', '.').toDoubleOrNull()
+                val number = if (movement.individuallyTracked) selectedUnits.size.toDouble() else quantity.trim().replace(',', '.').toDoubleOrNull()
                 error = runCatching {
                     require(number != null) { "Ingresá una cantidad válida." }
-                    validateMovementQuantity(number, movement.unit)
+                    validateMovementQuantity(number, movement.unit, movement.wholeNumbers)
                     require(number <= movement.pending) { "La cantidad supera lo pendiente (${formatStockQuantity(movement.pending)} ${movement.unit})." }
                 }.exceptionOrNull()?.message.orEmpty()
                 if (error.isBlank() && number != null) {
                     busy = true
                     scope.launch {
-                        val result = withContext(Dispatchers.IO) { runCatching { repository.returnStock(tools, movement.id, number, date, if (tools) null else workerId, notes) } }
+                        val result = withContext(Dispatchers.IO) { runCatching { repository.returnStock(tools, movement.id, number, date, if (tools) null else workerId, notes, selectedUnits.toList()) } }
                         busy = false
                         result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudo guardar la devolución." }
                     }

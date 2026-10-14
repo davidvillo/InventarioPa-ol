@@ -1,13 +1,10 @@
 package com.example.stockpaniol
 
-import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -79,14 +76,12 @@ fun StockApp(repository: StockRepository) {
     var historyTools by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var purchaseTools by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var personnel by rememberSaveable { mutableStateOf(false) }
+    var settings by rememberSaveable { mutableStateOf(false) }
     var rename by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
-    var photoItemId by rememberSaveable { mutableLongStateOf(0L) }
-    var photoTools by rememberSaveable { mutableStateOf(false) }
     var photoBusy by remember { mutableStateOf(false) }
     var previewUri by rememberSaveable { mutableStateOf<String?>(null) }
     var previewName by rememberSaveable { mutableStateOf("") }
@@ -97,7 +92,6 @@ fun StockApp(repository: StockRepository) {
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (uri != null) context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     repository.updateImage(targetTools, itemId, uri?.toString().orEmpty())
                 }
             }
@@ -112,10 +106,6 @@ fun StockApp(repository: StockRepository) {
             }
         }
     }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null && photoItemId != 0L) savePhoto(photoTools, photoItemId, uri)
-        photoItemId = 0L
-    }
     LaunchedEffect(tools, revision) {
         withContext(Dispatchers.IO) { repository.items(tools) to repository.stockName }.let { records = it.first; title = it.second }
     }
@@ -128,6 +118,7 @@ fun StockApp(repository: StockRepository) {
                         DropdownMenuItem(text = { Text(if (tools) "Movimientos de herramientas" else "Movimientos de materiales") }, onClick = { menu = false; historyTools = tools })
                         DropdownMenuItem(text = { Text(if (tools) "Compras de herramientas" else "Compras de materiales") }, onClick = { menu = false; purchaseTools = tools })
                         DropdownMenuItem(text = { Text("Personal de obra") }, onClick = { menu = false; personnel = true })
+                        DropdownMenuItem(text = { Text("Ajustes") }, onClick = { menu = false; settings = true })
                         DropdownMenuItem(text = { Text("Cambiar nombre del stock") }, onClick = { menu = false; rename = true })
                         DropdownMenuItem(text = { Text(if (complete) "Vista sencilla" else "Vista completa") }, onClick = { menu = false; complete = !complete })
                         DropdownMenuItem(text = { Text("Acerca del almacenamiento") }, onClick = { menu = false; about = true })
@@ -144,7 +135,7 @@ fun StockApp(repository: StockRepository) {
     }) { inset ->
         Column(Modifier.padding(inset).fillMaxSize()) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(query, { query = it }, label = { Text("Buscar por nombre") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(query, { query = it }, label = { Text("Buscar nombre, marca o identificador") }, singleLine = true, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { complete = !complete }) { Text(if (complete) "Sencilla" else "Completa") }
             }
@@ -170,7 +161,7 @@ fun StockApp(repository: StockRepository) {
                 }
             }
             val filtered = remember(records, query, sortColumn, sortDescending) {
-                sortStock(records.filter { it.name.contains(query, ignoreCase = true) }, sortColumn, sortDescending)
+                sortStock(records.filter { it.name.contains(query, ignoreCase = true) || it.identitySummary.contains(query, true) }, sortColumn, sortDescending)
             }
             if (filtered.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -198,7 +189,7 @@ fun StockApp(repository: StockRepository) {
                                 StockColumn.entries.forEach { column ->
                                     val value = when (column) {
                                         StockColumn.ITEM -> item.id.toString()
-                                        StockColumn.NAME -> item.name
+                                        StockColumn.NAME -> item.name + if (item.individuallyTracked) "\n${item.identitySummary}" else ""
                                         StockColumn.QUANTITY -> amount(item.quantity)
                                         StockColumn.UNIT -> item.unit
                                         StockColumn.NOTES -> item.notes.ifBlank { "—" }
@@ -223,7 +214,8 @@ fun StockApp(repository: StockRepository) {
                                 })
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                     Text(item.name, fontWeight = FontWeight.SemiBold)
-                                    Text("Ítem ${item.id}${if (item.brand.isBlank()) "" else " · ${item.brand}"}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                    if (!item.individuallyTracked && item.brand.isNotBlank()) Text(item.brand, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                    if (item.individuallyTracked) Text(item.identitySummary, style = MaterialTheme.typography.bodySmall)
                                 }
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text(amount(item.quantity), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
@@ -247,17 +239,18 @@ fun StockApp(repository: StockRepository) {
         PurchaseHistoryDialog(stockTools, repository, { purchaseTools = null })
     } }
     if (personnel) PersonnelDialog(repository, { personnel = false })
+    if (settings) SettingsDialog(repository, { settings = false })
     previewUri?.let { uri ->
         AlertDialog(onDismissRequest = { if (!photoBusy) previewUri = null }, title = { Text(previewName) }, text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 StockPhoto(uri, Modifier.fillMaxWidth().height(280.dp), expanded = true)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    IconButton(enabled = !photoBusy, onClick = {
-                        photoItemId = previewItemId
-                        photoTools = previewTools
-                        photoPicker.launch(arrayOf("image/*"))
-                    }) {
-                        Icon(painterResource(R.drawable.ic_edit_image), "Cambiar imagen de $previewName", tint = if (photoBusy) Color.Gray else Blue)
+                    StockImagePicker(enabled = !photoBusy,
+                        onSelected = { savePhoto(previewTools, previewItemId, it) },
+                        onError = { message -> scope.launch { snackbar.showSnackbar(message) } }) { openChooser ->
+                        IconButton(enabled = !photoBusy, onClick = openChooser) {
+                            Icon(painterResource(R.drawable.ic_edit_image), "Cambiar imagen de $previewName", tint = if (photoBusy) Color.Gray else Blue)
+                        }
                     }
                     IconButton(enabled = !photoBusy && uri.isNotBlank(), onClick = {
                         savePhoto(previewTools, previewItemId, null)
@@ -309,7 +302,6 @@ private fun StockPhoto(uri: String, modifier: Modifier = Modifier.size(48.dp), e
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: StockRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var existing by rememberSaveable { mutableStateOf(false) }
     var selectedId by rememberSaveable { mutableLongStateOf(records.firstOrNull()?.id ?: 0) }
@@ -317,21 +309,26 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
     var name by rememberSaveable { mutableStateOf("") }
     var quantity by rememberSaveable { mutableStateOf("") }
     var unit by rememberSaveable { mutableStateOf("unidades") }
+    var measures by remember { mutableStateOf(emptyList<MeasurementUnit>()) }
+    LaunchedEffect(Unit) {
+        measures = withContext(Dispatchers.IO) { repository.measurements(true) }
+    }
     var receipt by rememberSaveable { mutableStateOf("no hay") }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable { mutableStateOf("") }
     var brand by rememberSaveable { mutableStateOf("") }
+    var identifier by rememberSaveable { mutableStateOf("") }
+    var individualMaterial by rememberSaveable { mutableStateOf(false) }
     var company by rememberSaveable { mutableStateOf("") }
     var image by rememberSaveable { mutableStateOf("") }
     var materialType by rememberSaveable { mutableStateOf(MaterialTypes.CONSTRUCTION) }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var dropdown by remember { mutableStateOf(false) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }.onSuccess { image = uri.toString() }.onFailure { error = "No se pudo conservar la imagen. Elegí otra." }
-        }
-    }
+    val individual = tools || if (existing) selected?.individuallyTracked == true else individualMaterial
+    val countingUnit = measures.firstOrNull { it.counting }?.name ?: "unidades"
+    val actualUnit = if (existing) selected?.unit.orEmpty() else if (individual) countingUnit else unit
+    val selectedMeasure = measures.firstOrNull { it.name == actualUnit }
     androidx.compose.ui.window.Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxWidth().padding(12.dp).fillMaxHeight(0.94f), shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.padding(20.dp)) {
@@ -351,45 +348,57 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
                     if (!tools) {
                         if (existing) Text("Tipo de material: ${selected?.materialType.orEmpty()}")
                         else StockChoice("Tipo de material", materialType, MaterialTypes.all.map { it to it }, !busy) { materialType = it }
+                        if (!existing) Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(individualMaterial, { individualMaterial = it; if (it) unit = "unidades" }, enabled = !busy)
+                            Text("Identificar cada unidad (reutilizable)")
+                        }
                     }
-                    OutlinedTextField(quantity, { quantity = it }, label = { Text("Cantidad a ingresar *") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
-                    if (tools || existing) OutlinedTextField(if (existing) selected?.unit.orEmpty() else "unidades", {}, readOnly = true, label = { Text("Unidad (fija)") }, modifier = Modifier.fillMaxWidth())
+                    if (individual) Text("Se agrega una unidad identificada. Para agregar otra marca o ejemplar, registrá otro ingreso con el mismo nombre.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(if (individual) "1" else quantity, { quantity = it }, readOnly = individual, label = { Text("Cantidad a ingresar *") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+                    if (individual || existing) OutlinedTextField(actualUnit, {}, readOnly = true, label = { Text("Unidad (fija)") }, modifier = Modifier.fillMaxWidth())
                     else {
                         Text("Unidad")
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("unidades", "mts", "kg").forEach { option -> FilterChip(unit == option, { unit = option }, label = { Text(option) }) } }
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            measures.filter { it.active }.forEach { option -> FilterChip(unit == option.name, { unit = option.name }, label = { Text(option.name) }) }
+                        }
                     }
                     OutlinedTextField(receipt, { receipt = it }, label = { Text("Número de remito") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     StockDateField("Fecha de adquisición", date, !busy) { date = it }
-                    if (tools) {
+                    if (individual) {
                         OutlinedTextField(brand, { brand = it }, label = { Text("Marca") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(identifier, { identifier = it }, label = { Text("Identificador del pañolero (opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Text("Si lo dejás vacío se asigna un código único. Podés usar una etiqueta o número de serie.", style = MaterialTheme.typography.bodySmall)
                     }
                     OutlinedTextField(company, { company = it }, label = { Text("Empresa a la que se compró") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(notes, { notes = it }, label = { Text("Observaciones") }, minLines = 2, modifier = Modifier.fillMaxWidth())
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         StockPhoto(image.ifBlank { if (existing) selected?.image.orEmpty() else "" })
-                        TextButton(onClick = { picker.launch(arrayOf("image/*")) }) { Text(if (image.isBlank()) "Agregar imagen (opcional)" else "Cambiar imagen") }
+                        StockImagePicker(enabled = !busy, onSelected = { image = it.toString(); error = "" }, onError = { error = it }) { openChooser ->
+                            TextButton(enabled = !busy, onClick = openChooser) { Text(if (image.isBlank()) "Agregar imagen (opcional)" else "Cambiar imagen") }
+                        }
                     }
                     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancelar") }
                     Button(enabled = !busy, onClick = {
-                        val number = quantity.trim().replace(',', '.').toDoubleOrNull()
+                        val number = if (individual) 1.0 else quantity.trim().replace(',', '.').toDoubleOrNull()
                         val actualName = if (existing) selected?.name.orEmpty() else name.trim()
                         error = when {
                             actualName.isBlank() -> "Ingresá el nombre del artículo."
                             number == null || !number.isFinite() || number <= 0 -> "Ingresá una cantidad mayor a cero."
-                            (if (existing) selected?.unit else unit) == "unidades" && number % 1.0 != 0.0 -> "La cantidad de unidades debe ser un número entero."
-                            !existing && records.any { it.name.equals(actualName, true) } -> "Ese nombre ya existe. Seleccioná Existente para sumar stock."
+                            selectedMeasure == null || (!selectedMeasure.active && !existing && !individual) -> "Seleccioná una unidad disponible."
+                            selectedMeasure.wholeNumbers && number % 1.0 != 0.0 -> "La cantidad de ${selectedMeasure.name} debe ser un número entero."
+                            !individual && !existing && records.any { it.name.equals(actualName, true) } -> "Ese nombre ya existe. Seleccioná Existente para sumar stock."
                             else -> ""
                         }
                         if (error.isBlank() && number != null) {
                             busy = true
-                            val entry = StockEntry(if (existing) selectedId else 0, actualName, number, if (existing) selected!!.unit else unit, notes, receipt, date, image, brand, company, if (existing) selected!!.materialType else materialType)
+                            val entry = StockEntry(if (existing) selectedId else 0, actualName, number, actualUnit, notes, receipt, date, image, brand, company, if (existing) selected!!.materialType else materialType, if (individual) StockControl.INDIVIDUAL else StockControl.QUANTITY, if (individual) identifier else "")
                             scope.launch {
                                 val result = withContext(Dispatchers.IO) { runCatching { repository.receive(tools, entry) } }
                                 busy = false
-                                result.onSuccess { onSaved() }.onFailure { error = "No se pudo guardar el ingreso. Revisá los datos e intentá de nuevo." }
+                                result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudo guardar el ingreso. Revisá los datos e intentá de nuevo." }
                             }
                         }
                     }) { Text(if (busy) "Guardando…" else "Guardar ingreso") }

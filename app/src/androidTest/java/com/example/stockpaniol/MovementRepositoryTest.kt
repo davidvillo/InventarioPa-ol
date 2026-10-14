@@ -68,13 +68,13 @@ class MovementRepositoryTest {
     @Test fun toolPartialReturnsUpdateOriginalRowAndPersist() = withRepository { r, context ->
         r.receive(true, entry(true, 4.0))
         val person = worker(r)
-        r.issue(true, r.items(true).single().id, 3.0, date, person, "Préstamo")
+        r.issue(true, r.items(true).single().id, 3.0, date, person, "Préstamo", r.items(true).single().availableUnits.take(3).map { it.id })
         val outgoing = r.movements(true).first { it.kind == "Egreso" }
-        r.returnStock(true, outgoing.id, 1.0, date, null, "")
+        r.returnStock(true, outgoing.id, 1.0, date, null, "", outgoing.units.take(1).map { it.unit.id })
         assertEquals(2, r.movements(true).size)
         assertEquals(2.0, r.items(true).single().quantity, 0.0)
         assertEquals(2.0, r.movements(true).first { it.id == outgoing.id }.pending, 0.0)
-        r.returnStock(true, outgoing.id, 2.0, "2026-10-13", null, "")
+        r.returnStock(true, outgoing.id, 2.0, "2026-10-13", null, "", outgoing.units.drop(1).map { it.unit.id })
         r.close()
         LocalStockRepository(context).use { reopened ->
             assertEquals(4.0, reopened.items(true).single().quantity, 0.0)
@@ -100,7 +100,7 @@ class MovementRepositoryTest {
         assertRejected { r.issue(true, tool.id, 1.0, "2026-02-30", person, "") }
         assertEquals(3.0, r.items(true).single().quantity, 0.0)
         assertEquals(1, r.movements(true).size)
-        r.issue(true, tool.id, 2.0, date, person, "")
+        r.issue(true, tool.id, 2.0, date, person, "", tool.availableUnits.take(2).map { it.id })
         val outgoing = r.movements(true).first { it.kind == "Egreso" }
         assertRejected { r.returnStock(true, outgoing.id, 3.0, date, null, "") }
         assertRejected { r.returnStock(true, outgoing.id, 0.5, date, null, "") }
@@ -111,7 +111,7 @@ class MovementRepositoryTest {
         assertRejected { r.deleteMovement(true, income.id) }
         assertEquals(1.0, r.items(true).single().quantity, 0.0)
         assertEquals(10.5, r.items(false).single().quantity, 0.0)
-        r.returnStock(true, outgoing.id, 1.0, date, null, "")
+        r.returnStock(true, outgoing.id, 1.0, date, null, "", outgoing.units.take(1).map { it.unit.id })
         assertRejected { r.returnStock(true, outgoing.id, 2.0, date, null, "") }
         assertEquals(1.0, r.movements(true).first { it.id == outgoing.id }.pending, 0.0)
     }
@@ -166,7 +166,7 @@ class MovementRepositoryTest {
                 assertEquals(MaterialTypes.CONSTRUCTION, r.items(false).single().materialType)
                 assertEquals("Ingreso", r.movements(false).single().kind)
                 assertEquals("Ingreso", r.movements(true).single().kind)
-                assertEquals(3, r.readableDatabase.version)
+                assertEquals(6, r.readableDatabase.version)
                 assertTrue(r.personnel().isEmpty())
                 r.deleteMovement(false, r.movements(false).single().id)
                 assertEquals(0.0, r.items(false).single().quantity, 0.0)

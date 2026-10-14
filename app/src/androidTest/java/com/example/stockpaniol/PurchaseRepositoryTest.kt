@@ -107,7 +107,7 @@ class PurchaseRepositoryTest {
                 db.version = 2
             }
             LocalStockRepository(context).use { r ->
-                assertEquals(3, r.readableDatabase.version)
+                assertEquals(6, r.readableDatabase.version)
                 assertEquals("Mi obra", r.stockName)
                 assertEquals(7.5, r.items(false).single().quantity, 0.0)
                 assertEquals(3.0, r.items(true).single().quantity, 0.0)
@@ -120,7 +120,7 @@ class PurchaseRepositoryTest {
                 r.deleteMovement(false, 5L)
                 r.deleteMovement(false, 3L)
                 assertEquals(10.0, r.items(false).single().quantity, 0.0)
-                r.returnStock(true, 4L, 1.0, "2026-10-13", null, "")
+                r.returnStock(true, 4L, 1.0, "2026-10-13", null, "", r.movements(true).first { it.id == 4L }.units.filter { !it.returned }.map { it.unit.id })
                 assertEquals(4.0, r.items(true).single().quantity, 0.0)
                 assertEquals(0, r.readableDatabase.rawQuery("PRAGMA foreign_key_check", null).use { it.count })
             }

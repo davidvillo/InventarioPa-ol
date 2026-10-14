@@ -27,6 +27,25 @@ class PurchaseUiTest {
         compose.onNode(hasSetTextAction() and hasText(label)).performScrollTo().performTextReplacement(value)
     }
 
+    @Test fun repeatedToolNameCreatesDistinctBrandsAndIdentifiersInOneCatalogueItem() {
+        compose.onNodeWithText("Herramientas").performClick()
+        listOf("Bosch" to "B-01", "Wadfow" to "W-01").forEachIndexed { index, (brand, code) ->
+            compose.onNodeWithText("+ Agregar herramienta").performClick()
+            input("Nombre *", "Amoladora de 7 pulgadas")
+            input("Marca", brand)
+            input("Identificador del pañolero (opcional)", code)
+            compose.onNodeWithText("Guardar ingreso").performClick()
+            compose.waitUntil(10_000) { repository.purchases(true).size == index + 1 }
+            compose.waitForIdle()
+        }
+        val item = repository.items(true).single()
+        assertEquals(2.0, item.quantity, 0.0)
+        assertEquals(listOf("Bosch", "Wadfow"), item.units.map { it.brand })
+        compose.onNodeWithText("Amoladora de 7 pulgadas").performClick()
+        compose.onNodeWithText("Bosch · B-01").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Wadfow · W-01").performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun confirmedMaterialAndToolIncomeAppearInSeparatePurchaseLists() {
         for (tools in listOf(false, true)) {
             if (tools) compose.onNodeWithText("Herramientas").performClick()
@@ -35,7 +54,7 @@ class PurchaseUiTest {
             val company = if (tools) "Herramientas SA" else "Áridos SA"
             val receipt = if (tools) "R-H/12" else "R-M/12"
             input("Nombre *", name)
-            input("Cantidad a ingresar *", if (tools) "2" else "2,5")
+            if (!tools) input("Cantidad a ingresar *", "2,5")
             if (!tools) compose.onNodeWithText("kg").performScrollTo().performClick()
             input("Número de remito", receipt)
             input("Empresa a la que se compró", company)

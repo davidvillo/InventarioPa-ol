@@ -12,14 +12,13 @@ object MaterialTypes {
     const val ELECTRICAL = "Material eléctrico"
     val all = listOf(CONSTRUCTION, PPE, ELECTRICAL)
 }
-data class Worker(val id: Long, val name: String, val surname: String, val worksite: String, val nickname: String) {
-    val displayName: String get() = "$name $surname" + if (nickname.isBlank()) "" else " ($nickname)"
-    val selectionLabel: String get() = "$displayName · $worksite"
-}
 data class StockMovement(val id: Long, val itemId: Long, val itemName: String, val quantity: Double, val unit: String,
     val date: String, val person: String, val workerId: Long?, val kind: String, val materialType: String, val notes: String,
-    val parentId: Long?, val returned: Double, val returnDate: String, val purchaseId: Long?) {
+    val parentId: Long?, val returned: Double, val returnDate: String, val purchaseId: Long?,
+    val control: StockControl = StockControl.QUANTITY, val units: List<MovementUnit> = emptyList(), val wholeNumbers: Boolean = unit in listOf("unidades", "pares")) {
     val pending: Double get() = stockSum(quantity, -returned)
+    val individuallyTracked: Boolean get() = control == StockControl.INDIVIDUAL
+    val identitySummary: String get() = units.joinToString("; ") { if (kind == "Egreso") it.label else it.unit.label }
 }
 fun stockSum(a: Double, b: Double): Double = BigDecimal.valueOf(a).add(BigDecimal.valueOf(b)).toDouble()
 fun todayStockDate(): String = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date())
@@ -36,9 +35,9 @@ fun displayStockDate(date: String): String {
 }
 fun formatStockQuantity(value: Double): String = BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
     .replace('.', java.text.DecimalFormatSymbols.getInstance().decimalSeparator)
-fun validateMovementQuantity(quantity: Double, unit: String) {
+fun validateMovementQuantity(quantity: Double, unit: String, wholeNumbers: Boolean = unit in listOf("unidades", "pares")) {
     require(quantity.isFinite() && quantity > 0) { "Ingresá una cantidad mayor a cero." }
-    require(unit != "unidades" || quantity % 1.0 == 0.0) { "La cantidad de unidades debe ser un número entero." }
+    require(!wholeNumbers || quantity % 1.0 == 0.0) { "La cantidad de $unit debe ser un número entero." }
 }
 fun validateMovementDate(date: String) {
     val format = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply { isLenient = false }

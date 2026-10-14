@@ -47,7 +47,8 @@ class MovementUiTest {
         compose.onNodeWithText("Agregar personal").performClick()
         input("Nombre *", "Luis")
         input("Apellido *", "Pérez")
-        input("Obra *", "Obra sur")
+        compose.onNodeWithText("Obra *").performScrollTo().performClick()
+        compose.onNodeWithText("519").performClick()
         input("Apodo", "Lucho")
         compose.onNodeWithText("Guardar personal").performClick()
         compose.waitUntil(10_000) { repository.personnel().size == 2 }
@@ -66,7 +67,7 @@ class MovementUiTest {
         compose.onNodeWithText("Guantes").performClick()
         input("Cantidad (unidades)", "1")
         compose.onNodeWithText("Personal que recibe").performScrollTo().performClick()
-        compose.onNodeWithText("Luis Pérez (Lucho) · Obra sur").performClick()
+        compose.onNodeWithText("Luis Pérez (Lucho) · 519").performClick()
         compose.onNodeWithText("Confirmar egreso").performClick()
         compose.waitUntil(10_000) { repository.movements(false).any { it.kind == "Egreso" && it.itemName == "Guantes" } }
         val movement = repository.movements(false).first { it.kind == "Egreso" }
@@ -101,11 +102,12 @@ class MovementUiTest {
         val olderDate = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(yesterday.time)
         val tool = repository.items(true).single()
         repository.receive(true, StockEntry(tool.id, tool.name, 1.0, tool.unit, "", "", todayStockDate(), "", "", ""))
-        repository.issue(true, tool.id, 1.0, olderDate, repository.personnel().single().id, "Préstamo anterior")
+        repository.issue(true, tool.id, 1.0, olderDate, repository.personnel().single().id, "Préstamo anterior", listOf(tool.availableUnits.first().id))
+        val units = repository.items(true).single().availableUnits.take(3)
         compose.onNodeWithText("Herramientas").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Martillo").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Martillo").performClick()
-        input("Cantidad (unidades)", "3")
+        units.forEach { compose.onNodeWithText(it.label).performScrollTo().performClick() }
         selectWorker()
         compose.onNodeWithText("Confirmar egreso").performClick()
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 1.0 }
@@ -116,13 +118,13 @@ class MovementUiTest {
         compose.waitUntil(10_000) { compose.onAllNodes(loanMatcher).fetchSemanticsNodes().size == 2 }
         compose.onNodeWithText("Préstamo anterior").assertIsDisplayed()
         compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").performClick()
-        input("Cantidad a devolver (unidades)", "1")
+        compose.onNodeWithText(units.first().label).performScrollTo().performClick()
         compose.onNodeWithText("Confirmar devolución").performClick()
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 2.0 }
         compose.waitForIdle()
         compose.onNodeWithText("Pendiente: 2 unidades").assertIsDisplayed()
         compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").performClick()
-        input("Cantidad a devolver (unidades)", "2")
+        units.drop(1).forEach { compose.onNodeWithText(it.label).performScrollTo().performClick() }
         compose.onNodeWithText("Confirmar devolución").performClick()
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 4.0 }
         compose.waitForIdle()
