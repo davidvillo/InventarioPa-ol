@@ -7,6 +7,84 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class IndividualInventoryTest {
+    @Test fun automaticCodesUseNamePrefixesAndPersistIndependentCountersWithoutReusingDeletedCodes() = withRepository { r, context ->
+        for (tools in listOf(true, false)) {
+            val bucket = entry("", "", tools).copy(name = "Balde de albañil", quantity = 2.0)
+            val beacon = bucket.copy(name = "Baliza", quantity = 1.0)
+            r.receive(tools, bucket)
+            r.receive(tools, beacon)
+            assertEquals(listOf("BAL 001", "BAL 002"), r.items(tools).first { it.name == bucket.name }.units.map { it.identifier })
+            assertEquals("BAI 001", r.items(tools).first { it.name == beacon.name }.units.single().identifier)
+            r.receive(tools, bucket.copy(quantity = 1.0))
+            val lastIncome = r.movements(tools).first { it.units.any { unit -> unit.unit.identifier == "BAL 003" } }
+            r.deleteMovement(tools, lastIncome.id)
+        }
+        r.close()
+        LocalStockRepository(context).use { reopened ->
+            for (tools in listOf(true, false)) {
+                reopened.receive(tools, entry("", "", tools).copy(name = "Balde de albañil"))
+                reopened.receive(tools, entry("", "", tools).copy(name = "Baliza"))
+                assertEquals(listOf("BAL 001", "BAL 002", "BAL 004"), reopened.items(tools).first { it.name == "Balde de albañil" }.units.map { it.identifier })
+                assertEquals(listOf("BAI 001", "BAI 002"), reopened.items(tools).first { it.name == "Baliza" }.units.map { it.identifier })
+            }
+        }
+    }
+
+    @Test fun zeroQuantityReservesPrefixAndCustomCodesArePreservedAndSkipped() = withRepository { r, _ ->
+        r.receive(true, entry("", "").copy(name = "Balde de albañil", quantity = 0.0))
+        r.receive(true, entry("", "").copy(name = "Baliza"))
+        assertEquals("BAI 001", r.items(true).first { it.name == "Baliza" }.units.single().identifier)
+        r.receive(true, entry("", "").copy(name = "Balde de albañil", quantity = 3.0, unitDetails = listOf(
+            StockUnitEntry(), StockUnitEntry(identifier = "BAL 001"), StockUnitEntry(identifier = "ETIQUETA"))))
+        val bucket = r.items(true).first { it.name == "Balde de albañil" }
+        assertEquals(setOf("BAL 001", "BAL 002", "ETIQUETA"), bucket.units.map { it.identifier }.toSet())
+        r.identifyUnit(true, bucket.units.first { it.identifier == "BAL 002" }.id, "Marca", "EDITADO")
+        r.receive(true, entry("", "").copy(name = "Balde de albañil"))
+        assertEquals(setOf("BAL 001", "BAL 003", "ETIQUETA", "EDITADO"), r.items(true).first { it.id == bucket.id }.units.map { it.identifier }.toSet())
+    }
+
+    @Test fun zeroStockCreatesCatalogueWithoutPurchasesMovementsOrUnitsAndCanBeReplenished() = withRepository { r, context ->
+        for (tools in listOf(true, false)) {
+            r.receive(tools, entry("", "", tools).copy(quantity = 0.0))
+            r.receive(tools, entry("", "", tools).copy(quantity = 0.0))
+            assertEquals(0.0, r.items(tools).single().quantity, 0.0)
+            assertTrue(r.items(tools).single().units.isEmpty())
+            assertTrue(r.purchases(tools).isEmpty())
+            assertTrue(r.movements(tools).isEmpty())
+        }
+        val bulk = StockEntry(0, "Arena", 0.0, "kg", "", "", date, "", "", "")
+        r.receive(false, bulk)
+        r.close()
+        LocalStockRepository(context).use { reopened ->
+            assertEquals(0.0, reopened.items(true).single().quantity, 0.0)
+            assertEquals(2, reopened.items(false).size)
+            reopened.receive(false, bulk.copy(quantity = 2.5))
+            assertEquals(2.5, reopened.items(false).first { it.name == "Arena" }.quantity, 0.0)
+            reopened.receive(true, entry("", ""))
+            assertEquals(1, reopened.items(true).single().units.size)
+        }
+    }
+
+    @Test fun batchReceiptStoresEachBrandAndOptionalIdentityAndRejectsDuplicatesAtomically() = withRepository { r, _ ->
+        for (tools in listOf(true, false)) {
+            val batch = entry("", "", tools).copy(quantity = 3.0, unitDetails = listOf(
+                StockUnitEntry(), StockUnitEntry("Bosch", " ${if (tools) "H" else "M"}-2 "), StockUnitEntry("Otra", "SERIE-3")))
+            r.receive(tools, batch)
+            val item = r.items(tools).single()
+            assertEquals(3.0, item.quantity, 0.0)
+            assertEquals(3, item.units.map { it.identifier.lowercase() }.distinct().size)
+            assertEquals("Bosch", item.units.first { it.identifier.endsWith("-2") }.brand)
+            assertEquals("Otra", item.units.first { it.identifier == "SERIE-3" }.brand)
+            assertEquals(1, r.purchases(tools).size)
+            assertEquals(3, r.movements(tools).single().units.size)
+            rejects { r.receive(tools, batch.copy(quantity = 2.0, unitDetails = listOf(StockUnitEntry(identifier = "NUEVO"), StockUnitEntry(identifier = " nuevo ")))) }
+            rejects { r.receive(tools, batch.copy(quantity = 1.0, unitDetails = listOf(StockUnitEntry(identifier = "serie-3")))) }
+            rejects { r.receive(tools, batch.copy(quantity = 2.0)) }
+            assertEquals(item, r.items(tools).single())
+            assertEquals(1, r.purchases(tools).size)
+        }
+    }
+
     private val date = "2026-10-13"
     private fun entry(brand: String, identifier: String, tools: Boolean = true) = StockEntry(
         0, if (tools) "Amoladora de 7 pulgadas" else "Arnés", 1.0, "unidades", "", "R-1", date,
@@ -142,7 +220,7 @@ class IndividualInventoryTest {
         r.close()
         LocalStockRepository(context).use { upgraded ->
             val saved = upgraded.items(true).single()
-            assertEquals(6, upgraded.readableDatabase.version)
+            assertEquals(8, upgraded.readableDatabase.version)
             assertEquals(2.0, saved.quantity, 0.0)
             assertEquals(4, saved.units.size)
             assertEquals(2, saved.availableUnits.size)

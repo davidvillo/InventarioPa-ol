@@ -4,6 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InventoryPolicyTest {
+    @Test fun receiptsAllowZeroButRejectNegativeNonFiniteAndFractionalUnits() {
+        for (policy in listOf(InventoryPolicy.ByUnit, InventoryPolicy.ByQuantity)) {
+            policy.validateReceipt(0.0, "unidades", "")
+            for (quantity in listOf(-1.0, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, 1.5)) {
+                rejects { policy.validateReceipt(quantity, "unidades", "") }
+            }
+        }
+        InventoryPolicy.ByQuantity.validateReceipt(0.0, "kg", "")
+        rejects { validateMovementQuantity(0.0, "unidades") }
+    }
+
     private fun rejects(action: () -> Unit) {
         assertTrue(runCatching(action).exceptionOrNull() is IllegalArgumentException)
     }

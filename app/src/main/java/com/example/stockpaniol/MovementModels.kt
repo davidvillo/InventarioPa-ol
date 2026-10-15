@@ -15,7 +15,8 @@ object MaterialTypes {
 data class StockMovement(val id: Long, val itemId: Long, val itemName: String, val quantity: Double, val unit: String,
     val date: String, val person: String, val workerId: Long?, val kind: String, val materialType: String, val notes: String,
     val parentId: Long?, val returned: Double, val returnDate: String, val purchaseId: Long?,
-    val control: StockControl = StockControl.QUANTITY, val units: List<MovementUnit> = emptyList(), val wholeNumbers: Boolean = unit in listOf("unidades", "pares")) {
+    val control: StockControl = StockControl.QUANTITY, val units: List<MovementUnit> = emptyList(), val wholeNumbers: Boolean = unit in listOf("unidades", "pares"),
+    val auditProtected: Boolean = false) {
     val pending: Double get() = stockSum(quantity, -returned)
     val individuallyTracked: Boolean get() = control == StockControl.INDIVIDUAL
     val identitySummary: String get() = units.joinToString("; ") { if (kind == "Egreso") it.label else it.unit.label }

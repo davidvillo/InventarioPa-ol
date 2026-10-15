@@ -65,13 +65,13 @@ class MovementRepositoryTest {
         assertTrue(r.purchases(false).isEmpty())
     }
 
-    @Test fun toolPartialReturnsUpdateOriginalRowAndPersist() = withRepository { r, context ->
+    @Test fun toolPartialReturnsUpdateLoanAppendLedgerAndPersist() = withRepository { r, context ->
         r.receive(true, entry(true, 4.0))
         val person = worker(r)
         r.issue(true, r.items(true).single().id, 3.0, date, person, "Préstamo", r.items(true).single().availableUnits.take(3).map { it.id })
         val outgoing = r.movements(true).first { it.kind == "Egreso" }
         r.returnStock(true, outgoing.id, 1.0, date, null, "", outgoing.units.take(1).map { it.unit.id })
-        assertEquals(2, r.movements(true).size)
+        assertEquals(3, r.movements(true).size)
         assertEquals(2.0, r.items(true).single().quantity, 0.0)
         assertEquals(2.0, r.movements(true).first { it.id == outgoing.id }.pending, 0.0)
         r.returnStock(true, outgoing.id, 2.0, "2026-10-13", null, "", outgoing.units.drop(1).map { it.unit.id })
@@ -81,9 +81,9 @@ class MovementRepositoryTest {
             val loan = reopened.movements(true).first { it.id == outgoing.id }
             assertEquals(0.0, loan.pending, 0.0)
             assertEquals("2026-10-13", loan.returnDate)
-            assertEquals(2, reopened.movements(true).size)
+            assertEquals(5, reopened.movements(true).size)
             assertEquals("Obra norte", reopened.personnel().single().worksite)
-            reopened.deleteMovement(true, outgoing.id)
+            assertRejected { reopened.deleteMovement(true, outgoing.id) }
             assertEquals(4.0, reopened.items(true).single().quantity, 0.0)
         }
     }
@@ -166,7 +166,7 @@ class MovementRepositoryTest {
                 assertEquals(MaterialTypes.CONSTRUCTION, r.items(false).single().materialType)
                 assertEquals("Ingreso", r.movements(false).single().kind)
                 assertEquals("Ingreso", r.movements(true).single().kind)
-                assertEquals(6, r.readableDatabase.version)
+                assertEquals(8, r.readableDatabase.version)
                 assertTrue(r.personnel().isEmpty())
                 r.deleteMovement(false, r.movements(false).single().id)
                 assertEquals(0.0, r.items(false).single().quantity, 0.0)

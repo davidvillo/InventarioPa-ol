@@ -113,8 +113,9 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
                     Text("Observaciones: ${it.notes.ifBlank { "—" }}")
                     if (it.individuallyTracked) {
                         Text("Unidades identificadas", fontWeight = FontWeight.Bold)
-                        it.units.forEach { unit ->
-                            Text("${unit.label} · ${if (unit.available) "En pañol" else "Prestada a ${unit.holder}"}")
+                        it.units.filter { unit -> unit.inActiveStock }.forEach { unit ->
+                            Text("${unit.label} · ${unit.statusLabel}")
+                            if (unit.damageNotes.isNotBlank()) Text("Daño: ${unit.damageNotes}")
                             if (unit.legacy) Text("Unidad de stock anterior: verificá marca y etiqueta.", style = MaterialTheme.typography.bodySmall)
                             TextButton(enabled = !busy, onClick = { editUnit = unit }) { Text("Editar marca / identificador") }
                         }
@@ -233,17 +234,17 @@ fun sortMovements(rows: List<StockMovement>, column: MovementColumn, descending:
 }
 
 @Composable
-fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss: () -> Unit, onChanged: () -> Unit) {
+fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss: () -> Unit, onChanged: () -> Unit, initialQuery: String = "") {
     val scope = rememberCoroutineScope()
     val columns = movementColumns(tools)
     var rows by remember { mutableStateOf(emptyList<StockMovement>()) }
     var revision by remember { mutableIntStateOf(0) }
     var complete by rememberSaveable { mutableStateOf(false) }
     var filters by rememberSaveable { mutableStateOf(false) }
-    var query by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf(initialQuery) }
     var searchColumn by rememberSaveable { mutableStateOf("Todas") }
-    var from by rememberSaveable { mutableStateOf(if (tools) yesterdayStockDate() else "") }
-    var until by rememberSaveable { mutableStateOf(if (tools) todayStockDate() else "") }
+    var from by rememberSaveable { mutableStateOf(if (tools && initialQuery.isBlank()) yesterdayStockDate() else "") }
+    var until by rememberSaveable { mutableStateOf(if (tools && initialQuery.isBlank()) todayStockDate() else "") }
     var kind by rememberSaveable { mutableStateOf("Todos") }
     var category by rememberSaveable { mutableStateOf("Todos") }
     var sortColumn by rememberSaveable { mutableStateOf(MovementColumn.DATE) }
@@ -260,8 +261,7 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
     }
     val filtered = remember(rows, complete, query, searchColumn, from, until, kind, category, sortColumn, descending) {
         sortMovements(rows.filter { m ->
-            (!tools || complete || (m.kind == "Egreso" && m.pending > 0)) &&
-                (from.isBlank() || m.date >= from) && (until.isBlank() || m.date <= until) &&
+            (from.isBlank() || m.date >= from) && (until.isBlank() || m.date <= until) &&
                 (kind == "Todos" || m.kind == kind) && (category == "Todos" || m.materialType == category) &&
                 (if (searchColumn == "Todas") columns.any { it.display(m).contains(query, true) || it.text(m).contains(query, true) }
                 else columns.first { it.name == searchColumn }.let { it.display(m).contains(query, true) || it.text(m).contains(query, true) })
@@ -276,13 +276,13 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
             }) { Text(if (complete) "Vista completa" else "Vista sencilla") }
             TextButton(onClick = { filters = !filters }) { Text(if (filters) "Ocultar filtros" else "Filtros y orden") }
         }
-        if (tools && !complete) Text("Egresos pendientes · ${if (from == yesterdayStockDate() && until == todayStockDate()) "Ayer y hoy" else "Fechas seleccionadas"}", style = MaterialTheme.typography.bodySmall)
+        if (tools && !complete) Text("Todos los movimientos · ${if (from.isBlank() && until.isBlank()) "Todas las fechas" else if (from == yesterdayStockDate() && until == todayStockDate()) "Ayer y hoy" else "Fechas seleccionadas"}", style = MaterialTheme.typography.bodySmall)
         if (filters) {
             Column(Modifier.fillMaxWidth().heightIn(max = 230.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 StockChoice("Buscar en", if (searchColumn == "Todas") "Todas las columnas" else columns.first { it.name == searchColumn }.label,
                     listOf("Todas" to "Todas las columnas") + columns.map { it.name to it.label }) { searchColumn = it }
                 OutlinedTextField(query, { query = it }, label = { Text("Texto a filtrar") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                StockChoice("Tipo de movimiento", kind, listOf("Todos", "Ingreso", "Egreso", "Devolución").filter { !tools || it != "Devolución" }.map { it to it }) { kind = it }
+                StockChoice("Tipo de movimiento", kind, (listOf("Todos", "Ingreso", "Egreso") + if (tools) ToolLifecycle.movementKinds else listOf("Devolución")).map { it to it }) { kind = it }
                 if (!tools) StockChoice("Tipo de material", category, (listOf("Todos") + MaterialTypes.all).map { it to it }) { category = it }
                 StockDateField("Desde", from, allowClear = true) { from = it }
                 StockDateField("Hasta", until, allowClear = true) { until = it }
@@ -308,7 +308,7 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                     items(filtered, key = { it.id }) { movement ->
                         Row(Modifier.clickable(enabled = !busy) { selectedId = movement.id }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             columns.forEach { Text(it.display(movement), Modifier.width(it.width.dp).padding(vertical = 12.dp)) }
-                            IconButton(enabled = !busy, onClick = { deleteId = movement.id }, modifier = Modifier.width(64.dp)) {
+                            IconButton(enabled = !busy && !movement.auditProtected, onClick = { deleteId = movement.id }, modifier = Modifier.width(64.dp)) {
                                 Icon(painterResource(R.drawable.ic_delete_image), "Eliminar movimiento ${movement.id}", tint = MaterialTheme.colorScheme.error)
                             }
                         }
@@ -326,14 +326,14 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                                 Text(movement.itemName, fontWeight = FontWeight.Bold)
                                 if (movement.identitySummary.isNotBlank()) Text(movement.identitySummary)
                                 Text("${movement.kind} · ${displayStockDate(movement.date)}")
-                                Text(movement.person.ifBlank { "Sin personal (ingreso)" })
+                                Text(movement.person.ifBlank { "—" })
                                 Text("${formatStockQuantity(movement.quantity)} ${movement.unit}")
                                 if (!tools) Text(movement.materialType)
                                 if (movement.kind == "Egreso") Text("Pendiente: ${formatStockQuantity(movement.pending)} ${movement.unit}")
                                 if (tools && movement.returnDate.isNotBlank()) Text("Última devolución: ${displayStockDate(movement.returnDate)}")
                                 if (movement.notes.isNotBlank()) Text(movement.notes, style = MaterialTheme.typography.bodySmall)
                             }
-                            IconButton(enabled = !busy, onClick = { deleteId = movement.id }) {
+                            IconButton(enabled = !busy && !movement.auditProtected, onClick = { deleteId = movement.id }) {
                                 Icon(painterResource(R.drawable.ic_delete_image), "Eliminar movimiento ${movement.id}", tint = MaterialTheme.colorScheme.error)
                             }
                         }
@@ -368,6 +368,8 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
     var workerId by rememberSaveable { mutableStateOf(movement.workerId ?: 0L) }
     var quantity by rememberSaveable { mutableStateOf("") }
     var selectedUnits by rememberSaveable { mutableStateOf(longArrayOf()) }
+    var damagedUnits by rememberSaveable { mutableStateOf(longArrayOf()) }
+    var damageNotes by rememberSaveable { mutableStateOf(listOf<String>()) }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -393,19 +395,32 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
             }
             if (canReturn) {
                 Text("Cargar devolución", style = MaterialTheme.typography.titleMedium)
+                if (tools) Text("Marcá las unidades dañadas y explicá qué les pasó. Se cierra su préstamo, pero no vuelven al stock disponible.", style = MaterialTheme.typography.bodySmall)
                 if (!tools) StockChoice("Persona que devuelve", workers.firstOrNull { it.id == workerId }?.selectionLabel.orEmpty(), workers.map { it.id.toString() to it.selectionLabel }, !busy) { workerId = it.toLong() }
                 if (movement.individuallyTracked) {
                     Text("Marcá cuáles vuelven al pañol", fontWeight = FontWeight.Bold)
                     movement.units.filter { !it.returned }.forEach { entry ->
                         UnitSelection(entry.unit.label, entry.unit.id in selectedUnits, !busy) {
                             selectedUnits = if (entry.unit.id in selectedUnits) selectedUnits.filter { it != entry.unit.id }.toLongArray() else selectedUnits + entry.unit.id
+                            if (entry.unit.id !in selectedUnits) damagedUnits = damagedUnits.filter { it != entry.unit.id }.toLongArray()
+                        }
+                        if (tools && entry.unit.id in selectedUnits) {
+                            UnitSelection("Dañada: ${entry.unit.label}", entry.unit.id in damagedUnits, !busy) {
+                                damagedUnits = if (entry.unit.id in damagedUnits) damagedUnits.filter { it != entry.unit.id }.toLongArray() else damagedUnits + entry.unit.id
+                            }
+                            if (entry.unit.id in damagedUnits) {
+                                val index = movement.units.indexOf(entry)
+                                OutlinedTextField(damageNotes.getOrElse(index) { "" }, { value ->
+                                    damageNotes = List(maxOf(damageNotes.size, index + 1)) { if (it == index) value else damageNotes.getOrElse(it) { "" } }
+                                }, enabled = !busy, label = { Text("Qué le pasó a ${entry.unit.identifier} *") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+                            }
                         }
                     }
                     Text("Cantidad seleccionada: ${selectedUnits.size}")
                 } else OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad a devolver (${movement.unit})") },
                     keyboardOptions = KeyboardOptions(keyboardType = if (movement.wholeNumbers) KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
                 StockDateField("Fecha de devolución", date, !busy) { date = it }
-                if (!tools) OutlinedTextField(notes, { notes = it }, enabled = !busy, label = { Text("Observaciones de devolución") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(notes, { notes = it }, enabled = !busy, label = { Text("Observaciones de devolución") }, modifier = Modifier.fillMaxWidth())
             } else Text(if (movement.kind == "Egreso") "Devolución completa." else "Las devoluciones se cargan desde el egreso correspondiente.")
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         }
@@ -421,7 +436,10 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
                 if (error.isBlank() && number != null) {
                     busy = true
                     scope.launch {
-                        val result = withContext(Dispatchers.IO) { runCatching { repository.returnStock(tools, movement.id, number, date, if (tools) null else workerId, notes, selectedUnits.toList()) } }
+                        val damages = movement.units.mapIndexedNotNull { index, entry ->
+                            if (entry.unit.id in damagedUnits && entry.unit.id in selectedUnits) entry.unit.id to damageNotes.getOrElse(index) { "" } else null
+                        }.toMap()
+                        val result = withContext(Dispatchers.IO) { runCatching { repository.returnStock(tools, movement.id, number, date, if (tools) null else workerId, notes, selectedUnits.toList(), damages) } }
                         busy = false
                         result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudo guardar la devolución." }
                     }

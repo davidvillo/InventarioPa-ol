@@ -40,6 +40,9 @@ class MovementUiTest {
         compose.onNodeWithText("☰").performClick()
         compose.onNodeWithText("Movimientos de ${if (tools) "herramientas" else "materiales"}").performClick()
     }
+    private fun scrollHistoryTo(matcher: SemanticsMatcher) {
+        compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(isDialog())).performScrollToNode(matcher)
+    }
 
     @Test fun personnelFormAndMaterialCategoryAreAvailableForNewIssues() {
         compose.onNodeWithText("☰").performClick()
@@ -97,7 +100,7 @@ class MovementUiTest {
         assertEquals(10.0, repository.items(false).single().quantity, 0.0)
     }
 
-    @Test fun toolHistoryDefaultsToYesterdayAndTodayAndHidesCompletedLoansOnlyInSimpleView() {
+    @Test fun toolHistoryIncludesReturnsAndCompletedLoansInBothViews() {
         val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
         val olderDate = SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(yesterday.time)
         val tool = repository.items(true).single()
@@ -113,29 +116,34 @@ class MovementUiTest {
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 1.0 }
         compose.waitForIdle()
         openHistory(true)
-        compose.onNodeWithText("Egresos pendientes · Ayer y hoy").assertIsDisplayed()
-        val loanMatcher = hasText("Martillo") and hasAnyAncestor(isDialog())
-        compose.waitUntil(10_000) { compose.onAllNodes(loanMatcher).fetchSemanticsNodes().size == 2 }
+        compose.onNodeWithText("Todos los movimientos · Ayer y hoy").assertIsDisplayed()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("4 movimientos").fetchSemanticsNodes().isNotEmpty() }
+        scrollHistoryTo(hasText("Préstamo anterior"))
         compose.onNodeWithText("Préstamo anterior").assertIsDisplayed()
+        scrollHistoryTo(hasText("Egreso · ${displayStockDate(todayStockDate())}"))
         compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").performClick()
         compose.onNodeWithText(units.first().label).performScrollTo().performClick()
         compose.onNodeWithText("Confirmar devolución").performClick()
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 2.0 }
         compose.waitForIdle()
+        scrollHistoryTo(hasText("Pendiente: 2 unidades"))
         compose.onNodeWithText("Pendiente: 2 unidades").assertIsDisplayed()
         compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").performClick()
         units.drop(1).forEach { compose.onNodeWithText(it.label).performScrollTo().performClick() }
         compose.onNodeWithText("Confirmar devolución").performClick()
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 4.0 }
         compose.waitForIdle()
-        compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").assertDoesNotExist()
+        scrollHistoryTo(hasText("Egreso · ${displayStockDate(todayStockDate())}"))
+        compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").assertExists()
+        scrollHistoryTo(hasText("Préstamo anterior"))
         compose.onNodeWithText("Préstamo anterior").assertIsDisplayed()
         compose.onNodeWithText("Filtros y orden").performClick()
         compose.onNodeWithText("Limpiar filtros").performScrollTo().performClick()
         compose.onNodeWithText("Ocultar filtros").performClick()
+        scrollHistoryTo(hasText("Préstamo anterior"))
         compose.onNodeWithText("Préstamo anterior").assertIsDisplayed()
         compose.onNodeWithText("Vista sencilla").performClick()
-        compose.onAllNodes(loanMatcher).assertCountEquals(4)
-        assertEquals(4, repository.movements(true).size)
+        compose.onNodeWithText("7 movimientos").assertIsDisplayed()
+        assertEquals(7, repository.movements(true).size)
     }
 }

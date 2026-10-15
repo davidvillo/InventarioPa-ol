@@ -100,7 +100,7 @@ class MeasurementRepositoryTest {
         r.writableDatabase.version=5
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(6,upgraded.readableDatabase.version)
+            assertEquals(8,upgraded.readableDatabase.version)
             assertEquals(worker,upgraded.personnel().single())
             assertEquals(before,upgraded.movements(false))
             assertEquals(2.0,upgraded.items(false).single().quantity,0.0)
