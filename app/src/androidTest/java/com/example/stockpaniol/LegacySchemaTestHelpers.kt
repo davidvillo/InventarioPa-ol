@@ -18,5 +18,17 @@ internal fun removeToolLifecycleSchema(db: SQLiteDatabase) {
 }
 
 internal fun removeToolRentalSchema(db: SQLiteDatabase) {
+    removeToolBundleSchema(db)
     db.execSQL("DROP TABLE IF EXISTS alquileres_herramientas")
+}
+
+internal fun removeToolBundleSchema(db: SQLiteDatabase) {
+    removeStockCatalogueSchema(db)
+    db.execSQL("DROP TABLE IF EXISTS prestamos_conjuntos")
+    db.execSQL("DROP TABLE IF EXISTS miembros_conjuntos")
+    db.execSQL("DROP TABLE IF EXISTS conjuntos_herramientas")
+}
+
+internal fun removeStockCatalogueSchema(db: SQLiteDatabase) {
+    db.execSQL("DROP TABLE IF EXISTS opciones_stock")
 }

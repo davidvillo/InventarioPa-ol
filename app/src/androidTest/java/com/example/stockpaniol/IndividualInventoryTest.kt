@@ -220,7 +220,7 @@ class IndividualInventoryTest {
         r.close()
         LocalStockRepository(context).use { upgraded ->
             val saved = upgraded.items(true).single()
-            assertEquals(8, upgraded.readableDatabase.version)
+            assertEquals(10, upgraded.readableDatabase.version)
             assertEquals(2.0, saved.quantity, 0.0)
             assertEquals(4, saved.units.size)
             assertEquals(2, saved.availableUnits.size)

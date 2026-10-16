@@ -36,7 +36,9 @@ class LocalPersonnelRepository(private val database: () -> SQLiteDatabase) : Per
     override fun personnel(includeInactive: Boolean): List<Worker> = database().rawQuery("""SELECT p.id, p.nombre, p.apellido,
         o.id, o.nombre, o.activo, p.apodo, p.activo FROM personal p JOIN obras o ON o.id=p.obra_id
         ${if (includeInactive) "" else "WHERE p.activo=1"} ORDER BY p.apellido COLLATE NOCASE, p.nombre COLLATE NOCASE, p.id""", null).use { c ->
+        val collator = java.text.Collator.getInstance(java.util.Locale.forLanguageTag("es-AR")).apply { strength = java.text.Collator.PRIMARY }
         buildList { while (c.moveToNext()) add(Worker(c.getLong(0), c.getString(1), c.getString(2), Worksite(c.getLong(3), c.getString(4), c.getInt(5) == 1), c.getString(6), c.getInt(7) == 1)) }
+            .sortedWith(compareBy(collator) { worker: Worker -> worker.name }.thenBy(collator) { worker: Worker -> worker.surname }.thenBy { it.id })
     }
 
     private fun values(worker: Worker) = ContentValues().apply {

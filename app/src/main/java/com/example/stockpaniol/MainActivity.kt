@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -29,7 +32,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,6 +78,7 @@ fun StockApp(repository: StockRepository) {
     var records by remember { mutableStateOf(emptyList<StockItem>()) }
     var revision by remember { mutableIntStateOf(0) }
     var form by rememberSaveable { mutableStateOf(false) }
+    var editToolId by rememberSaveable { mutableStateOf<Long?>(null) }
     var issueItemId by rememberSaveable { mutableStateOf<Long?>(null) }
     var issueTools by rememberSaveable { mutableStateOf(false) }
     var historyTools by rememberSaveable { mutableStateOf<Boolean?>(null) }
@@ -78,6 +87,7 @@ fun StockApp(repository: StockRepository) {
     var settings by rememberSaveable { mutableStateOf(false) }
     var toolCare by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var rentals by rememberSaveable { mutableStateOf(false) }
+    var bundles by rememberSaveable { mutableStateOf(false) }
     var rename by rememberSaveable { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
@@ -113,7 +123,7 @@ fun StockApp(repository: StockRepository) {
     val activeRecords = records.filter { !tools || it.units.isEmpty() || it.units.any { unit -> unit.inActiveStock } }
     Scaffold(containerColor = Background, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
         Column {
-            TopAppBar(title = { Text(title, modifier = Modifier.clickable { rename = true }, maxLines = 1) }, navigationIcon = {
+            TopAppBar(title = { Text(title, modifier = Modifier.clickable { rename = true }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
                 Box {
                     TextButton(onClick = { menu = true }) { Text("☰", color = Color.White, style = MaterialTheme.typography.headlineSmall) }
                     DropdownMenu(menu, { menu = false }) {
@@ -125,9 +135,14 @@ fun StockApp(repository: StockRepository) {
                         DropdownMenuItem(text = { Text("Estado y reparación de herramientas") }, onClick = { menu = false; toolCare = false })
                         DropdownMenuItem(text = { Text("Papelera de herramientas") }, onClick = { menu = false; toolCare = true })
                         DropdownMenuItem(text = { Text("Herramientas alquiladas") }, onClick = { menu = false; rentals = true })
-                        DropdownMenuItem(text = { Text(if (complete) "Vista sencilla" else "Vista completa") }, onClick = { menu = false; complete = !complete })
+                        DropdownMenuItem(text = { Text("Unir / desunir herramientas") }, onClick = { menu = false; bundles = true })
                         DropdownMenuItem(text = { Text("Acerca del almacenamiento") }, onClick = { menu = false; about = true })
                     }
+                }
+            }, actions = {
+                TextButton(onClick = { complete = !complete }, contentPadding = PaddingValues(horizontal = 10.dp)) {
+                    Text(if (complete) "Vista sencilla" else "Vista completa", color = Color.White,
+                        style = MaterialTheme.typography.labelMedium, maxLines = 1)
                 }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Blue, titleContentColor = Color.White))
             TabRow(selectedTabIndex = if (tools) 1 else 0, containerColor = Color.White) {
@@ -139,11 +154,27 @@ fun StockApp(repository: StockRepository) {
         ExtendedFloatingActionButton(onClick = { form = true }, containerColor = Blue, contentColor = Color.White) { Text(if (tools) "+ Agregar herramienta" else "+ Agregar material") }
     }) { inset ->
         Column(Modifier.padding(inset).fillMaxSize()) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(query, { query = it }, label = { Text("Buscar nombre, marca o identificador") }, singleLine = true, modifier = Modifier.weight(1f))
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = { complete = !complete }) { Text(if (complete) "Sencilla" else "Completa") }
-            }
+            BasicTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp),
+                cursorBrush = SolidColor(Blue),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)
+                    .semantics { contentDescription = "Buscar nombre, marca o identificador" },
+                decorationBox = { input ->
+                    Box(Modifier.fillMaxWidth().heightIn(min = 32.dp)
+                        .background(Color.White, RoundedCornerShape(8.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) Text("Buscar nombre, marca o identificador",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        input()
+                    }
+                }
+            )
             Text("${activeRecords.size} ${if (tools) "herramientas" else "materiales"} · ${if (complete) "Vista completa" else "Vista sencilla"}", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) {
@@ -189,7 +220,7 @@ fun StockApp(repository: StockRepository) {
                     LazyColumn(contentPadding = PaddingValues(bottom = 100.dp)) {
                         items(filtered, key = { it.id }) { item ->
                             Row(Modifier.background(Color.White).clickable {
-                                issueTools = tools; issueItemId = item.id
+                                if (tools) editToolId = item.id else { issueTools = false; issueItemId = item.id }
                             }.padding(12.dp)) {
                                 StockColumn.entries.forEach { column ->
                                     val value = when (column) {
@@ -209,7 +240,14 @@ fun StockApp(repository: StockRepository) {
             } else {
                 LazyColumn(contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 100.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(filtered, key = { it.id }) { item ->
-                        Card(modifier = Modifier.clickable { issueTools = tools; issueItemId = item.id }, colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(10.dp)) {
+                        if (tools) {
+                            ToolSummaryCard(item, onPhoto = {
+                                previewName = item.name
+                                previewItemId = item.id
+                                previewTools = true
+                                previewPhotos = item.images
+                            }, onEdit = { editToolId = item.id })
+                        } else Card(modifier = Modifier.clickable { issueTools = false; issueItemId = item.id }, colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(10.dp)) {
                             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 StockPhoto(item.images.firstOrNull().orEmpty(), Modifier.size(72.dp).clickable(onClickLabel = "Ampliar imagen") {
                                     previewName = item.name
@@ -234,6 +272,11 @@ fun StockApp(repository: StockRepository) {
         }
     }
     if (form) EntryDialog(tools, records, repository, onDismiss = { form = false }, onSaved = { form = false; revision++ })
+    editToolId?.let { id -> key(id) {
+        ToolEditDialog(id, repository, onDismiss = { editToolId = null },
+            onSaved = { editToolId = null; revision++ },
+            onIssue = { editToolId = null; issueTools = true; issueItemId = id })
+    } }
     issueItemId?.let { id -> key(issueTools, id) {
         IssueDialog(issueTools, id, repository, { issueItemId = null }, { issueItemId = null; revision++ })
     } }
@@ -247,6 +290,7 @@ fun StockApp(repository: StockRepository) {
     if (settings) SettingsDialog(repository, { settings = false })
     toolCare?.let { trash -> ToolCareDialog(repository, trash, { toolCare = null }, { revision++ }) }
     if (rentals) ToolRentalsDialog(repository, { rentals = false }, { revision++ })
+    if (bundles) ToolBundlesDialog(repository, { bundles = false }, { revision++ })
     previewPhotos?.let { photos ->
         StockPhotoGallery(previewName, photos, photoBusy,
             onSave = { savePhotos(previewTools, previewItemId, it) },
@@ -293,13 +337,18 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
     var quantity by rememberSaveable { mutableStateOf("") }
     var unit by rememberSaveable { mutableStateOf("unidades") }
     var measures by remember { mutableStateOf(emptyList<MeasurementUnit>()) }
+    var brands by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
+    var companies by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
     LaunchedEffect(Unit) {
-        measures = withContext(Dispatchers.IO) { repository.measurements(true) }
+        withContext(Dispatchers.IO) { Triple(repository.measurements(true), repository.stockOptions(StockCatalogueKind.BRAND), repository.stockOptions(StockCatalogueKind.COMPANY)) }
+            .let { measures = it.first; brands = it.second; companies = it.third }
     }
     var receipt by rememberSaveable { mutableStateOf("no hay") }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable { mutableStateOf("") }
     var unitBrands by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var sameBrand by rememberSaveable { mutableStateOf(false) }
+    var commonBrand by rememberSaveable { mutableStateOf("") }
     var unitIdentifiers by rememberSaveable { mutableStateOf(listOf<String>()) }
     var individualMaterial by rememberSaveable { mutableStateOf(false) }
     var company by rememberSaveable { mutableStateOf("") }
@@ -339,7 +388,7 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
                             Text("Es una herramienta alquilada")
                         }
                         if (rented) {
-                            OutlinedTextField(company, { company = it }, enabled = !busy, label = { Text("Proveedor del alquiler *") }, modifier = Modifier.fillMaxWidth())
+                            StockCatalogueField("Proveedor del alquiler *", company, companies, !busy) { company = it }
                             Text("El alquiler se registra por cada unidad ingresada.", style = MaterialTheme.typography.bodySmall)
                         }
                     }
@@ -362,15 +411,23 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
                     }
                     OutlinedTextField(if (tools && rented && receipt == "no hay") "" else receipt, { receipt = it }, label = { Text(if (tools && rented) "Remito / contrato de alquiler (opcional)" else "Número de remito") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     StockDateField(if (tools && rented) "Fecha de inicio del alquiler" else "Fecha de adquisición", date, !busy) { date = it }
+                    if (individual) {
+                        SameBrandCheckbox(sameBrand, !busy) { checked ->
+                                if (checked && commonBrand.isBlank()) commonBrand = unitBrands.firstOrNull().orEmpty()
+                                if (!checked) unitBrands = List(maxOf(individualCount, unitBrands.size)) { commonBrand }
+                                sameBrand = checked
+                        }
+                        if (sameBrand) StockCatalogueField("Marca de todas las unidades (opcional)", commonBrand, brands, !busy) { commonBrand = it }
+                    } else StockCatalogueField("Marca (opcional)", commonBrand, brands, !busy) { commonBrand = it }
                     if (individual && individualCount > 0) Text("Marca e identificación opcionales para cada unidad. Si dejás el identificador vacío, se usan tres letras del nombre y un número correlativo: BAL 001, BAL 002… Si las letras ya están en uso, se toma la siguiente del nombre.", style = MaterialTheme.typography.bodySmall)
                     } }
                     if (individual) {
                         items(individualCount) { index ->
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text("Unidad ${index + 1}", fontWeight = FontWeight.Bold)
-                            OutlinedTextField(unitBrands.getOrElse(index) { "" }, { value ->
+                            if (!sameBrand) StockCatalogueField("Marca de unidad ${index + 1} (opcional)", unitBrands.getOrElse(index) { "" }, brands, !busy) { value ->
                                 unitBrands = List(maxOf(unitBrands.size, index + 1)) { if (it == index) value else unitBrands.getOrElse(it) { "" } }
-                            }, enabled = !busy, label = { Text("Marca de unidad ${index + 1} (opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                            }
                             OutlinedTextField(unitIdentifiers.getOrElse(index) { "" }, { value ->
                                 unitIdentifiers = List(maxOf(unitIdentifiers.size, index + 1)) { if (it == index) value else unitIdentifiers.getOrElse(it) { "" } }
                             }, enabled = !busy, label = { Text("Identificador de unidad ${index + 1} (opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -378,7 +435,7 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
                         }
                     }
                     item { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (!tools || !rented) OutlinedTextField(company, { company = it }, label = { Text("Empresa a la que se compró") }, modifier = Modifier.fillMaxWidth())
+                    if (!tools || !rented) StockCatalogueField("Empresa a la que se compró", company, companies, !busy) { company = it }
                     OutlinedTextField(notes, { notes = it }, label = { Text("Observaciones") }, minLines = 2, modifier = Modifier.fillMaxWidth())
                     val addedImages = StockPhotos.decode(image)
                     val allImages = ((if (existing) selected?.images.orEmpty() else emptyList()) + addedImages).distinct()
@@ -414,8 +471,8 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
                         }
                         if (error.isBlank() && number != null) {
                             busy = true
-                            val details = if (individual) List(individualCount) { StockUnitEntry(unitBrands.getOrElse(it) { "" }, unitIdentifiers.getOrElse(it) { "" }) } else emptyList()
-                            val entry = StockEntry(if (existing) selectedId else 0, actualName, number, actualUnit, notes, receipt, date, image, "", company, if (existing) selected!!.materialType else materialType, if (individual) StockControl.INDIVIDUAL else StockControl.QUANTITY, unitDetails = details,
+                            val details = if (individual) List(individualCount) { StockUnitEntry(if (sameBrand) commonBrand else unitBrands.getOrElse(it) { "" }, unitIdentifiers.getOrElse(it) { "" }) } else emptyList()
+                            val entry = StockEntry(if (existing) selectedId else 0, actualName, number, actualUnit, notes, receipt, date, image, if (!individual || sameBrand) commonBrand else "", company, if (existing) selected!!.materialType else materialType, if (individual) StockControl.INDIVIDUAL else StockControl.QUANTITY, unitDetails = details,
                                 rental = if (tools && rented) RentalEntry(company, receipt.takeUnless { it == "no hay" }.orEmpty()) else null)
                             scope.launch {
                                 val result = withContext(Dispatchers.IO) { runCatching { repository.receive(tools, entry) } }

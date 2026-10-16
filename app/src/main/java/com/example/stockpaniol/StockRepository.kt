@@ -6,9 +6,15 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 /** Local repository boundary: a future remote implementation can preserve this contract. */
-interface StockRepository : PersonnelRepository, MeasurementRepository {
+interface StockRepository : PersonnelRepository, MeasurementRepository, StockCatalogueRepository {
     fun items(tools: Boolean): List<StockItem>
     fun receive(tools: Boolean, entry: StockEntry)
+    fun updateTool(itemId: Long, edit: ToolEdit)
+    fun deleteTool(itemId: Long)
+    fun toolBundles(): List<ToolBundle>
+    fun saveToolBundle(id: Long?, name: String, unitIds: List<Long>)
+    fun dissolveToolBundle(id: Long)
+    fun toolLoanUnits(movementId: Long): List<ToolLoanUnit>
     fun updateImage(tools: Boolean, itemId: Long, image: String)
     fun updateImages(tools: Boolean, itemId: Long, images: List<String>)
     fun movements(tools: Boolean): List<StockMovement>
@@ -22,7 +28,12 @@ interface StockRepository : PersonnelRepository, MeasurementRepository {
     var stockName: String
 }
 
-class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_paniol.db", null, 8), StockRepository {
+class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_paniol.db", null, 10), StockRepository {
+    private val catalogue = LocalStockCatalogueRepository { writableDatabase }
+    override fun stockOptions(kind: StockCatalogueKind, includeInactive: Boolean) = catalogue.stockOptions(kind, includeInactive)
+    override fun addStockOption(kind: StockCatalogueKind, name: String) = catalogue.addStockOption(kind, name)
+    override fun updateStockOption(kind: StockCatalogueKind, id: Long, name: String) = catalogue.updateStockOption(kind, id, name)
+    override fun deleteStockOption(kind: StockCatalogueKind, id: Long) = catalogue.deleteStockOption(kind, id)
     private val people = LocalPersonnelRepository { writableDatabase }
     private val unitCatalogue = LocalMeasurementRepository { writableDatabase }
     override fun measurements(includeInactive: Boolean) = unitCatalogue.measurements(includeInactive)
@@ -53,6 +64,8 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         LocalMeasurementRepository.migrate(db)
         ToolLifecycle.migrate(db)
         ToolRentals.migrate(db)
+        ToolBundles.migrate(db)
+        LocalStockCatalogueRepository.migrate(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
@@ -73,6 +86,8 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         if (oldVersion < 6) LocalMeasurementRepository.migrate(db)
         if (oldVersion < 7) ToolLifecycle.migrate(db)
         if (oldVersion < 8) ToolRentals.migrate(db)
+        if (oldVersion < 9) ToolBundles.migrate(db)
+        if (oldVersion < 10) LocalStockCatalogueRepository.migrate(db)
     }
     private fun unitTable(tools: Boolean) = "unidades_${table(tools)}"
     private fun unitMovementTable(tools: Boolean) = "unidades_movimientos_${table(tools)}"
@@ -166,6 +181,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
     }
 
     private fun inventoryUnits(tools: Boolean, db: SQLiteDatabase = readableDatabase): List<InventoryUnit> {
+        val bundles = if (tools && db.version >= 9) ToolBundles.all(db).flatMap { b -> b.unitIds.map { it to b } }.toMap() else emptyMap()
         val states = if (tools && db.version >= 7) ToolLifecycle.states(db) else emptyMap()
         val rentals = if (tools && db.version >= 8) ToolRentals.all(db) else emptyMap()
         return db.rawQuery("""SELECT u.id, u.articulo_id, u.identificador, u.marca,
@@ -177,7 +193,8 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
             val state = states[c.getLong(0)]
             add(InventoryUnit(c.getLong(0), c.getLong(1), c.getString(2), c.getString(3), c.getString(4), c.getInt(5) == 1,
                 if (c.isNull(6)) null else c.getLong(6), state?.condition ?: ToolCondition.OPERATIVE,
-                state?.damage.orEmpty(), state?.date.orEmpty(), state?.workshop.orEmpty(), state?.repairDate.orEmpty(), rentals[c.getLong(0)]))
+                state?.damage.orEmpty(), state?.date.orEmpty(), state?.workshop.orEmpty(), state?.repairDate.orEmpty(), rentals[c.getLong(0)],
+                bundles[c.getLong(0)]?.id, bundles[c.getLong(0)]?.name.orEmpty()))
         } }
     }
     }
@@ -206,6 +223,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         require(identifier.isNotBlank()) { "Ingresá un identificador." }
         require(inventoryUnits(tools).none { it.id != unitId && it.identifier.equals(identifier.trim(), true) }) { "Ese identificador ya existe." }
         check(db.update(unitTable(tools), ContentValues().apply { put("marca", brand.trim()); put("identificador", identifier.trim()); put("legado", 0) }, "id=?", arrayOf(unitId.toString())) == 1) { "Unidad inexistente." }
+        catalogue.remember(StockCatalogueKind.BRAND, brand)
     }
     /** Preserve legacy IDs so purchases, returns and personnel keep their relationships. */
     private fun splitMovementSchema(db: SQLiteDatabase) {
@@ -273,6 +291,108 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
     override fun updateImage(tools: Boolean, itemId: Long, image: String) =
         updateImages(tools, itemId, StockPhotos.decode(image))
 
+    override fun toolBundles() = ToolBundles.all(readableDatabase)
+
+    override fun saveToolBundle(id: Long?, name: String, unitIds: List<Long>) = transaction { db ->
+        require(name.isNotBlank()) { "Ingresá un nombre para el conjunto." }
+        require(unitIds.size >= 2 && unitIds.distinct().size == unitIds.size) { "Seleccioná al menos dos unidades distintas." }
+        val bundles = toolBundles()
+        val previous = id?.let { target -> bundles.firstOrNull { it.id == target } ?: error("El conjunto ya no existe.") }
+        require(bundles.none { it.id != id && it.name.equals(name.trim(), true) }) { "Ese nombre de conjunto ya existe." }
+        val units = inventoryUnits(true, db).associateBy { it.id }
+        require((unitIds + previous?.unitIds.orEmpty()).all { units[it]?.available == true }) { "Para unir o separar herramientas, todas deben estar disponibles en el pañol." }
+        require(bundles.none { it.id != id && it.unitIds.any { member -> member in unitIds } }) { "Una de las herramientas ya pertenece a otro conjunto. Separala primero." }
+        val values = ContentValues().apply { put("nombre", name.trim()) }
+        val target = id ?: db.insertOrThrow("conjuntos_herramientas", null, values)
+        if (id != null) db.update("conjuntos_herramientas", values, "id=?", arrayOf(id.toString()))
+        db.delete("miembros_conjuntos", "conjunto_id=?", arrayOf(target.toString()))
+        unitIds.forEach { db.execSQL("INSERT INTO miembros_conjuntos VALUES (?, ?)", arrayOf<Any>(it, target)) }
+    }
+
+    override fun dissolveToolBundle(id: Long) = transaction { db ->
+        val bundle = toolBundles().firstOrNull { it.id == id } ?: error("El conjunto ya no existe.")
+        val units = inventoryUnits(true, db).associateBy { it.id }
+        require(bundle.unitIds.all { units[it]?.loanId == null }) { "Registrá primero la devolución de todo el conjunto." }
+        db.delete("conjuntos_herramientas", "id=?", arrayOf(id.toString()))
+    }
+
+    override fun toolLoanUnits(movementId: Long): List<ToolLoanUnit> {
+        val tokens = ToolBundles.loanTokens(readableDatabase)
+        val loans = movements(true).filter { it.kind == "Egreso" }.flatMap { m ->
+            m.units.filter { !it.returned }.map { ToolLoanUnit(m.id, m.itemName, it.unit, tokens[m.id to it.unit.id]) }
+        }
+        val selectedTokens = loans.filter { it.movementId == movementId }.mapNotNull { it.bundleLoan }.toSet()
+        return loans.filter { it.movementId == movementId || it.bundleLoan in selectedTokens }
+    }
+
+    override fun updateTool(itemId: Long, edit: ToolEdit) = transaction { db ->
+        val item = items(true).firstOrNull { it.id == itemId } ?: error("La herramienta ya no existe.")
+        require(edit.name.isNotBlank()) { "Ingresá el nombre de la herramienta." }
+        require(items(true).none { it.id != itemId && it.name.equals(edit.name.trim(), true) }) { "Ese nombre ya existe." }
+        require(edit.units.map { it.id }.toSet() == item.units.map { it.id }.toSet() && edit.units.size == item.units.size) {
+            "Las unidades cambiaron. Cerrá la ventana y volvé a abrirla."
+        }
+        val identifiers = edit.units.map { it.identifier.trim().lowercase(java.util.Locale.ROOT) }
+        require(identifiers.none { it.isBlank() }) { "Ingresá un identificador para cada unidad." }
+        require(identifiers.distinct().size == identifiers.size) { "No se pueden repetir identificadores." }
+        require(inventoryUnits(true, db).none { it.itemId != itemId && it.identifier.lowercase(java.util.Locale.ROOT) in identifiers }) { "Ese identificador ya existe." }
+        val purchases = purchases(true).filter { it.itemId == itemId }
+        require(edit.purchases.map { it.id }.toSet() == purchases.map { it.id }.toSet() && edit.purchases.size == purchases.size) {
+            "Los ingresos cambiaron. Cerrá la ventana y volvé a abrirla."
+        }
+        edit.purchases.forEach { purchase ->
+            validateMovementDate(purchase.date)
+            val units = db.rawQuery("SELECT id FROM unidades_herramientas WHERE compra_id=?", arrayOf(purchase.id.toString())).use { c ->
+                buildList { while (c.moveToNext()) add(c.getLong(0)) }
+            }
+            val laterDates = movements(true).filter { it.kind != "Ingreso" && it.units.any { u -> u.unit.id in units } }.map { it.date }
+            require(laterDates.none { it < purchase.date }) { "La adquisición no puede ser posterior a los movimientos de sus unidades." }
+        }
+        db.update("herramientas", ContentValues().apply {
+            put("nombre", edit.name.trim()); put("observaciones", edit.notes.trim()); put("empresa", edit.company.trim())
+            put("imagen", StockPhotos.encode(edit.images))
+        }, "id=?", arrayOf(itemId.toString()))
+        // Stage unique temporary codes so identifiers can be swapped in a single save.
+        edit.units.forEach { unit ->
+            var temporary: String
+            do { temporary = "edicion-${java.util.UUID.randomUUID()}" }
+            while (db.rawQuery("SELECT 1 FROM unidades_herramientas WHERE identificador=?", arrayOf(temporary)).use { it.moveToFirst() })
+            db.execSQL("UPDATE unidades_herramientas SET identificador=? WHERE id=?", arrayOf<Any>(temporary, unit.id))
+        }
+        edit.units.forEach { unit ->
+            val previous = item.units.first { it.id == unit.id }
+            db.update("unidades_herramientas", ContentValues().apply {
+                put("marca", unit.brand.trim()); put("identificador", unit.identifier.trim())
+                if (previous.brand != unit.brand.trim() || previous.identifier != unit.identifier.trim()) put("legado", 0)
+            }, "id=?", arrayOf(unit.id.toString()))
+        }
+        edit.purchases.forEach { purchase ->
+            db.update("compras_herramientas", ContentValues().apply {
+                put("fecha", purchase.date); put("remito", purchase.receipt.trim().ifBlank { "no hay" }); put("empresa", purchase.company.trim())
+            }, "id=?", arrayOf(purchase.id.toString()))
+            db.execSQL("UPDATE movimientos_herramientas SET fecha=? WHERE compra_id=?", arrayOf<Any>(purchase.date, purchase.id))
+        }
+        edit.units.forEach { catalogue.remember(StockCatalogueKind.BRAND, it.brand) }
+        (edit.purchases.map { it.company } + edit.company).forEach { catalogue.remember(StockCatalogueKind.COMPANY, it) }
+    }
+
+    override fun deleteTool(itemId: Long) = transaction { db ->
+        require(items(true).any { it.id == itemId }) { "La herramienta ya no existe." }
+        require(items(true).first { it.id == itemId }.units.none { it.bundleId != null }) { "Separá primero la herramienta de su conjunto." }
+        require(movements(true).none { it.itemId == itemId && it.kind !in listOf("Ingreso", ToolRentals.INCOME) }) {
+            "No se puede eliminar: la herramienta tiene préstamos u otros movimientos. Usá la opción de dar de baja para conservar su historial."
+        }
+        val args = arrayOf(itemId.toString())
+        db.delete("eventos_herramientas", "articulo_id=?", args)
+        db.delete("estado_herramientas", "unidad_id IN (SELECT id FROM unidades_herramientas WHERE articulo_id=?)", args)
+        db.delete("alquileres_herramientas", "unidad_id IN (SELECT id FROM unidades_herramientas WHERE articulo_id=?)", args)
+        db.delete("unidades_movimientos_herramientas", "articulo_id=?", args)
+        db.delete("unidades_herramientas", "articulo_id=?", args)
+        db.delete("movimientos_herramientas", "articulo_id=?", args)
+        db.delete("compras_herramientas", "articulo_id=?", args)
+        db.delete("herramientas", "id=?", args)
+    }
+
     override fun updateImages(tools: Boolean, itemId: Long, images: List<String>) {
         val encoded = StockPhotos.encode(images)
         check(writableDatabase.update(table(tools), ContentValues().apply {
@@ -312,6 +432,9 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
             require(identifiers.distinctBy { it.lowercase(java.util.Locale.ROOT) }.size == identifiers.size) { "No se pueden repetir identificadores." }
             val existingIdentifiers = inventoryUnits(tools).map { it.identifier.lowercase(java.util.Locale.ROOT) }.toSet()
             require(identifiers.none { it.lowercase(java.util.Locale.ROOT) in existingIdentifiers }) { "Ese identificador ya existe." }
+            (unitDetails.map { it.brand } + entry.brand).forEach { catalogue.remember(StockCatalogueKind.BRAND, it) }
+            catalogue.remember(StockCatalogueKind.COMPANY, entry.company)
+            entry.rental?.let { catalogue.remember(StockCatalogueKind.COMPANY, it.supplier) }
             val id = if (current == null) {
                 db.insertOrThrow(table(tools), null, ContentValues().apply {
                     put("nombre", entry.name.trim()); put("cantidad", entry.quantity); put("unidad", entry.unit)
@@ -376,7 +499,8 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         if (!tools) return regular
         val events = ToolLifecycle.movements(readableDatabase)
         val protectedLoans = events.mapNotNull { it.parentId }.toSet()
-        return regular.map { if (it.id in protectedLoans) it.copy(auditProtected = true) else it } + events
+        val bundleLoans = ToolBundles.loanTokens(readableDatabase).keys.map { it.first }.toSet()
+        return regular.map { if (it.id in protectedLoans || it.id in bundleLoans) it.copy(auditProtected = true) else it } + events
     }
     override fun purchases(tools: Boolean): List<StockPurchase> {
         val units = movementUnits(tools)
@@ -406,6 +530,29 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         })
     }
     override fun issue(tools: Boolean, itemId: Long, quantity: Double, date: String, workerId: Long, notes: String, unitIds: List<Long>) = transaction { db ->
+        if (!tools) {
+            issueSingle(db, false, itemId, quantity, date, workerId, notes, unitIds)
+        } else {
+            val item = items(true).firstOrNull { it.id == itemId } ?: error("La herramienta ya no existe.")
+            item.policy.validateSelection(quantity, unitIds)
+            require(unitIds.all { id -> item.units.any { it.id == id } }) { "Seleccioná unidades de esta herramienta." }
+            val bundles = toolBundles().filter { it.unitIds.any { id -> id in unitIds } }
+            val expanded = (unitIds + bundles.flatMap { it.unitIds }).distinct()
+            val units = inventoryUnits(true, db).filter { it.id in expanded }
+            require(units.size == expanded.size && units.all { it.available }) { "No se puede prestar el conjunto: alguna herramienta no está disponible en el pañol." }
+            val movementIds = units.groupBy { it.itemId }.mapValues { (target, members) ->
+                issueSingle(db, true, target, members.size.toDouble(), date, workerId, notes, members.map { it.id })
+            }
+            bundles.forEach { bundle ->
+                val token = java.util.UUID.randomUUID().toString()
+                units.filter { it.id in bundle.unitIds }.forEach { unit ->
+                    db.execSQL("INSERT INTO prestamos_conjuntos VALUES (?, ?, ?)", arrayOf<Any>(movementIds.getValue(unit.itemId), unit.id, token))
+                }
+            }
+        }
+    }
+
+    private fun issueSingle(db: SQLiteDatabase, tools: Boolean, itemId: Long, quantity: Double, date: String, workerId: Long, notes: String, unitIds: List<Long>): Long {
         val item = items(tools).firstOrNull { it.id == itemId } ?: error("El artículo ya no existe.")
         validateMovementQuantity(quantity, item.unit, item.wholeNumbers)
         validateMovementDate(date)
@@ -416,8 +563,31 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         changeQuantity(db, tools, item, -quantity)
         val movementId = insertMovement(db, tools, item, quantity, date, worker, "Egreso", notes)
         linkUnits(db, tools, movementId, item.id, unitIds, false)
+        return movementId
     }
     override fun returnStock(tools: Boolean, movementId: Long, quantity: Double, date: String, workerId: Long?, notes: String, unitIds: List<Long>, damagedUnits: Map<Long, String>) = transaction { db ->
+        if (!tools) {
+            returnSingle(db, false, movementId, quantity, date, workerId, notes, unitIds, damagedUnits)
+        } else {
+            val movement = movements(true).firstOrNull { it.id == movementId } ?: error("El movimiento ya no existe.")
+            if (!movement.individuallyTracked) {
+                returnSingle(db, true, movementId, quantity, date, workerId, notes, unitIds, damagedUnits)
+            } else {
+                InventoryPolicy.ByUnit.validateSelection(quantity, unitIds)
+                require(unitIds.all { id -> movement.units.any { it.unit.id == id && !it.returned } }) { "Seleccioná una unidad pendiente de este préstamo." }
+                val candidates = toolLoanUnits(movementId)
+                val tokens = candidates.filter { it.movementId == movementId && it.unit.id in unitIds }.mapNotNull { it.bundleLoan }.toSet()
+                val expanded = candidates.filter { (it.movementId == movementId && it.unit.id in unitIds) || it.bundleLoan in tokens }
+                require(damagedUnits.keys.all { id -> expanded.any { it.unit.id == id } }) { "Marcá como dañadas solo las herramientas que se devuelven." }
+                expanded.groupBy { it.movementId }.forEach { (target, units) ->
+                    val ids = units.map { it.unit.id }
+                    returnSingle(db, true, target, ids.size.toDouble(), date, workerId, notes, ids, damagedUnits.filterKeys { it in ids })
+                }
+            }
+        }
+    }
+
+    private fun returnSingle(db: SQLiteDatabase, tools: Boolean, movementId: Long, quantity: Double, date: String, workerId: Long?, notes: String, unitIds: List<Long>, damagedUnits: Map<Long, String>) {
         val movement = movements(tools).firstOrNull { it.id == movementId } ?: error("El movimiento ya no existe.")
         require(movement.kind == "Egreso") { "Solo se pueden devolver egresos." }
         validateMovementQuantity(quantity, movement.unit, movement.wholeNumbers)
@@ -482,6 +652,15 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
     }
     override fun deleteMovement(tools: Boolean, movementId: Long) = transaction { db ->
         val movement = movements(tools).firstOrNull { it.id == movementId } ?: error("El movimiento ya no existe.")
+        if (tools) {
+            require(!db.rawQuery("SELECT 1 FROM prestamos_conjuntos WHERE movimiento_id=? LIMIT 1", arrayOf(movementId.toString())).use { it.moveToFirst() }) {
+                "Este préstamo pertenece a un conjunto. Conservá el registro y cargá su devolución."
+            }
+            if (movement.kind == "Ingreso") {
+                val grouped = toolBundles().flatMap { it.unitIds }.toSet()
+                require(movement.units.none { it.unit.id in grouped }) { "Separá primero las herramientas de su conjunto." }
+            }
+        }
         require(!movement.auditProtected) { "Este movimiento conserva el historial de la herramienta y no se puede eliminar." }
         val item = items(tools).first { it.id == movement.itemId }
         if (item.individuallyTracked && movement.kind == "Ingreso") {

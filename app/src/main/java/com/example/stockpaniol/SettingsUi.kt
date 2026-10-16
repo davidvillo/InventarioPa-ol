@@ -20,12 +20,16 @@ fun SettingsDialog(repository: StockRepository, onDismiss: () -> Unit) {
     when (section) {
         "obras" -> WorksitesDialog(repository, { section = null })
         "unidades" -> MeasurementSettingsDialog(repository, { section = null })
+        "marcas" -> StockCatalogueSettingsDialog(repository, StockCatalogueKind.BRAND, { section = null })
+        "empresas" -> StockCatalogueSettingsDialog(repository, StockCatalogueKind.COMPANY, { section = null })
         else -> StockOverlay(onDismiss) {
             Text("Ajustes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text("Administrá las opciones disponibles en los formularios.")
             Spacer(Modifier.height(16.dp))
             OutlinedButton(onClick = { section = "obras" }, modifier = Modifier.fillMaxWidth()) { Text("Obras") }
             OutlinedButton(onClick = { section = "unidades" }, modifier = Modifier.fillMaxWidth()) { Text("Unidades") }
+            OutlinedButton(onClick = { section = "marcas" }, modifier = Modifier.fillMaxWidth()) { Text("Marcas") }
+            OutlinedButton(onClick = { section = "empresas" }, modifier = Modifier.fillMaxWidth()) { Text("Empresas") }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onDismiss) { Text("Cerrar") }
         }

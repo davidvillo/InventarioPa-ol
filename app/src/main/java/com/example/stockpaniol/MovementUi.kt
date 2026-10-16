@@ -134,10 +134,18 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
                         }
                     }
                     Text("Cantidad seleccionada: ${selectedUnits.size}")
+                    if (tools) {
+                        val groups = selected.units.filter { it.id in selectedUnits }.mapNotNull { it.bundleId }.toSet()
+                        val companions = records.flatMap { item -> item.units.filter { it.bundleId in groups && it.id !in selectedUnits }.map { item.name to it } }
+                        if (companions.isNotEmpty()) {
+                            Text("También se prestan con el conjunto:", fontWeight = FontWeight.Bold)
+                            companions.forEach { (name, unit) -> Text("$name · ${unit.label} · ${unit.statusLabel}") }
+                        }
+                    }
                 } else OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad (${selected?.unit.orEmpty()})") },
                     keyboardOptions = KeyboardOptions(keyboardType = if (selected?.wholeNumbers == true) KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
                 StockDateField("Fecha del movimiento", date, !busy) { date = it }
-                StockChoice("Personal que recibe", workers.firstOrNull { it.id == workerId }?.selectionLabel.orEmpty(), workers.map { it.id.toString() to it.selectionLabel }, !busy) { workerId = it.toLong() }
+                PersonnelChoice("Personal que recibe", workers, workerId, !busy) { workerId = it }
                 TextButton(enabled = !busy, onClick = { personal = true }) { Text("Agregar personal de obra") }
                 if (workers.isEmpty()) Text("Registrá primero a la persona que recibe.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(notes, { notes = it }, enabled = !busy, label = { Text("Observaciones") }, minLines = 2, modifier = Modifier.fillMaxWidth())
@@ -183,12 +191,14 @@ private fun UnitSelection(label: String, selected: Boolean, enabled: Boolean, on
 private fun IdentifyUnitDialog(tools: Boolean, unit: InventoryUnit, repository: StockRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
     val scope = rememberCoroutineScope()
     var brand by rememberSaveable(unit.id) { mutableStateOf(unit.brand) }
+    var brands by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
+    LaunchedEffect(Unit) { runCatching { withContext(Dispatchers.IO) { repository.stockOptions(StockCatalogueKind.BRAND) } }.onSuccess { brands = it } }
     var identifier by rememberSaveable(unit.id) { mutableStateOf(unit.identifier) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Identificar unidad") }, text = {
         Column {
-            OutlinedTextField(brand, { brand = it }, enabled = !busy, label = { Text("Marca") })
+            StockCatalogueField("Marca", brand, brands, !busy) { brand = it }
             OutlinedTextField(identifier, { identifier = it }, enabled = !busy, label = { Text("Identificador único") })
             Text("Los movimientos anteriores conservan la identificación registrada al realizarlos.", style = MaterialTheme.typography.bodySmall)
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
@@ -374,9 +384,18 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
     var notes by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    var loanUnits by remember { mutableStateOf(emptyList<ToolLoanUnit>()) }
+    var loadingUnits by remember { mutableStateOf(tools && movement.kind == "Egreso") }
     LaunchedEffect(Unit) {
         if (!tools) runCatching { withContext(Dispatchers.IO) { repository.personnel(true).filter { it.active || it.id == movement.workerId } } }.onSuccess { workers = it }.onFailure { error = "No se pudo cargar el personal." }
+        if (tools && movement.kind == "Egreso") {
+            runCatching { withContext(Dispatchers.IO) { repository.toolLoanUnits(movement.id) } }
+                .onSuccess { loanUnits = it }
+                .onFailure { error = "No se pudieron cargar las herramientas del préstamo." }
+            loadingUnits = false
+        }
     }
+    val returnEntries = if (tools) loanUnits.map { MovementUnit(it.unit, false) } else movement.units
     val canReturn = movement.kind == "Egreso" && movement.pending > 0
     StockOverlay({ if (!busy) onDismiss() }) {
         Text(movement.itemName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -396,20 +415,25 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
             if (canReturn) {
                 Text("Cargar devolución", style = MaterialTheme.typography.titleMedium)
                 if (tools) Text("Marcá las unidades dañadas y explicá qué les pasó. Se cierra su préstamo, pero no vuelven al stock disponible.", style = MaterialTheme.typography.bodySmall)
-                if (!tools) StockChoice("Persona que devuelve", workers.firstOrNull { it.id == workerId }?.selectionLabel.orEmpty(), workers.map { it.id.toString() to it.selectionLabel }, !busy) { workerId = it.toLong() }
+                if (!tools) PersonnelChoice("Persona que devuelve", workers, workerId, !busy) { workerId = it }
                 if (movement.individuallyTracked) {
                     Text("Marcá cuáles vuelven al pañol", fontWeight = FontWeight.Bold)
-                    movement.units.filter { !it.returned }.forEach { entry ->
-                        UnitSelection(entry.unit.label, entry.unit.id in selectedUnits, !busy) {
-                            selectedUnits = if (entry.unit.id in selectedUnits) selectedUnits.filter { it != entry.unit.id }.toLongArray() else selectedUnits + entry.unit.id
-                            if (entry.unit.id !in selectedUnits) damagedUnits = damagedUnits.filter { it != entry.unit.id }.toLongArray()
+                    if (loadingUnits) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (loanUnits.any { it.bundleLoan != null }) Text("Las herramientas unidas se seleccionan y devuelven juntas. Podés indicar el daño de cada una.", style = MaterialTheme.typography.bodySmall)
+                    returnEntries.filter { !it.returned }.forEach { entry ->
+                        val loanUnit = loanUnits.firstOrNull { it.unit.id == entry.unit.id }
+                        val label = if (loanUnit != null && loanUnit.movementId != movement.id) "${loanUnit.itemName} · ${entry.unit.label}" else entry.unit.label
+                        UnitSelection(label, entry.unit.id in selectedUnits, !busy && !loadingUnits) {
+                            val linked = if (loanUnit?.bundleLoan != null) loanUnits.filter { it.bundleLoan == loanUnit.bundleLoan }.map { it.unit.id } else listOf(entry.unit.id)
+                            selectedUnits = if (entry.unit.id in selectedUnits) selectedUnits.filter { it !in linked }.toLongArray() else (selectedUnits.toList() + linked).distinct().toLongArray()
+                            damagedUnits = damagedUnits.filter { it in selectedUnits }.toLongArray()
                         }
                         if (tools && entry.unit.id in selectedUnits) {
                             UnitSelection("Dañada: ${entry.unit.label}", entry.unit.id in damagedUnits, !busy) {
                                 damagedUnits = if (entry.unit.id in damagedUnits) damagedUnits.filter { it != entry.unit.id }.toLongArray() else damagedUnits + entry.unit.id
                             }
                             if (entry.unit.id in damagedUnits) {
-                                val index = movement.units.indexOf(entry)
+                                val index = returnEntries.indexOf(entry)
                                 OutlinedTextField(damageNotes.getOrElse(index) { "" }, { value ->
                                     damageNotes = List(maxOf(damageNotes.size, index + 1)) { if (it == index) value else damageNotes.getOrElse(it) { "" } }
                                 }, enabled = !busy, label = { Text("Qué le pasó a ${entry.unit.identifier} *") }, minLines = 2, modifier = Modifier.fillMaxWidth())
@@ -426,8 +450,8 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cerrar") }
-            if (canReturn) Button(enabled = !busy, onClick = {
-                val number = if (movement.individuallyTracked) selectedUnits.size.toDouble() else quantity.trim().replace(',', '.').toDoubleOrNull()
+            if (canReturn) Button(enabled = !busy && !loadingUnits, onClick = {
+                val number = if (movement.individuallyTracked) movement.units.count { it.unit.id in selectedUnits }.toDouble() else quantity.trim().replace(',', '.').toDoubleOrNull()
                 error = runCatching {
                     require(number != null) { "Ingresá una cantidad válida." }
                     validateMovementQuantity(number, movement.unit, movement.wholeNumbers)
@@ -436,10 +460,11 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
                 if (error.isBlank() && number != null) {
                     busy = true
                     scope.launch {
-                        val damages = movement.units.mapIndexedNotNull { index, entry ->
+                        val damages = returnEntries.mapIndexedNotNull { index, entry ->
                             if (entry.unit.id in damagedUnits && entry.unit.id in selectedUnits) entry.unit.id to damageNotes.getOrElse(index) { "" } else null
                         }.toMap()
-                        val result = withContext(Dispatchers.IO) { runCatching { repository.returnStock(tools, movement.id, number, date, if (tools) null else workerId, notes, selectedUnits.toList(), damages) } }
+                        val ownIds = movement.units.filter { it.unit.id in selectedUnits }.map { it.unit.id }
+                        val result = withContext(Dispatchers.IO) { runCatching { repository.returnStock(tools, movement.id, number, date, if (tools) null else workerId, notes, ownIds, damages) } }
                         busy = false
                         result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudo guardar la devolución." }
                     }

@@ -25,7 +25,7 @@ class ToolRentalsUiTest {
             compose.onNodeWithText("Herramientas").performClick()
             compose.onNodeWithText("+ Agregar herramienta").performClick()
             input("Nombre *", "Amoladora")
-            compose.onNode(isToggleable()).performScrollTo().performClick()
+            compose.onNode(isToggleable() and hasAnySibling(hasText("Es una herramienta alquilada"))).performScrollTo().performClick()
             input("Proveedor del alquiler *", "Alquileres Norte")
             input("Cantidad a ingresar *", "1")
             input("Remito / contrato de alquiler (opcional)", "A-25")

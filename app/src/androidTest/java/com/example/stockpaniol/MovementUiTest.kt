@@ -110,6 +110,9 @@ class MovementUiTest {
         compose.onNodeWithText("Herramientas").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Martillo").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Martillo").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasSetTextAction() and hasText("Nombre *")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(isDialog())).performScrollToNode(hasText("Registrar egreso"))
+        compose.onNodeWithText("Registrar egreso").performClick()
         units.forEach { compose.onNodeWithText(it.label).performScrollTo().performClick() }
         selectWorker()
         compose.onNodeWithText("Confirmar egreso").performClick()

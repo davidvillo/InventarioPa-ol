@@ -9,12 +9,47 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+@Composable
+fun PersonnelChoice(label: String, workers: List<Worker>, selectedId: Long, enabled: Boolean = true, onSelect: (Long) -> Unit) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    var search by rememberSaveable { mutableStateOf("") }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    fun closePicker() { focus.clearFocus(force = true); keyboard?.hide(); open = false }
+    OutlinedButton(enabled = enabled, onClick = { search = ""; open = true }, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+            Text(label, style = MaterialTheme.typography.labelSmall)
+            Text(workers.firstOrNull { it.id == selectedId }?.selectionLabel ?: "Seleccionar personal ▾")
+        }
+    }
+    if (open) StockOverlay({ closePicker() }) {
+        Text(label, style = MaterialTheme.typography.titleLarge)
+        OutlinedTextField(search, { search = it }, label = { Text("Buscar nombre, apellido o apodo") },
+            singleLine = true, modifier = Modifier.fillMaxWidth())
+        val collator = remember { java.text.Collator.getInstance(java.util.Locale.forLanguageTag("es-AR")).apply { strength = java.text.Collator.PRIMARY } }
+        val filtered = workers.filter { it.selectionLabel.contains(search.trim(), true) }
+            .sortedWith(compareBy(collator) { worker: Worker -> worker.name }.thenBy(collator) { worker: Worker -> worker.surname }.thenBy { it.id })
+        LazyColumn(Modifier.weight(1f)) {
+            items(filtered, key = { it.id }) { worker ->
+                TextButton(onClick = { closePicker(); onSelect(worker.id) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(worker.selectionLabel, Modifier.fillMaxWidth())
+                }
+            }
+            if (filtered.isEmpty()) item { Text("No se encontró personal con esa búsqueda.", Modifier.padding(12.dp)) }
+        }
+        TextButton(onClick = { closePicker() }) { Text("Cancelar") }
+    }
+}
 
 @Composable
 fun PersonnelDialog(repository: PersonnelRepository, onDismiss: () -> Unit) {
