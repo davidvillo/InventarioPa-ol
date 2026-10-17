@@ -41,10 +41,11 @@ data class InventoryUnit(val id: Long, val itemId: Long, val identifier: String,
     val holder: String = "", val legacy: Boolean = false, val loanId: Long? = null,
     val condition: ToolCondition = ToolCondition.OPERATIVE, val damageNotes: String = "", val statusDate: String = "",
     val repairPlace: String = "", val repairDate: String = "", val rental: ToolRental? = null,
-    val bundleId: Long? = null, val bundleName: String = "", val useDamaged: Boolean = false) {
-    val available: Boolean get() = loanId == null && condition == ToolCondition.OPERATIVE && rental?.closed != true
-    val inActiveStock: Boolean get() = condition != ToolCondition.RETIRED && rental?.closed != true
-    val statusLabel: String get() = if (rental?.closed == true) "Alquiler devuelto al proveedor" else if (loanId != null) "Prestada a $holder" else if (useDamaged) "Disponible · utilizar dañado" else condition.label
+    val bundleId: Long? = null, val bundleName: String = "", val useDamaged: Boolean = false,
+    val excludedByAdjustment: Boolean = false) {
+    val available: Boolean get() = !excludedByAdjustment && loanId == null && condition == ToolCondition.OPERATIVE && rental?.closed != true
+    val inActiveStock: Boolean get() = !excludedByAdjustment && condition != ToolCondition.RETIRED && rental?.closed != true
+    val statusLabel: String get() = if (excludedByAdjustment) "Retirada por corrección de cantidad" else if (rental?.closed == true) "Alquiler devuelto al proveedor" else if (loanId != null) "Prestada a $holder" else if (useDamaged) "Disponible · utilizar dañado" else condition.label
     val label: String get() = (listOf(brand, identifier) + listOfNotNull(rental?.let { "Alquilada: ${it.supplier}" }, bundleName.takeIf { it.isNotBlank() }?.let { "Conjunto: $it" })).filter { it.isNotBlank() }.joinToString(" · ")
 }
 
@@ -67,6 +68,10 @@ data class StockUnitEntry(val brand: String = "", val identifier: String = "")
 
 data class ToolUnitEdit(val id: Long, val brand: String, val identifier: String)
 data class ToolPurchaseEdit(val id: Long, val date: String, val receipt: String, val company: String)
+
+data class MaterialEdit(val name: String, val quantity: Double, val expectedQuantity: Double,
+    val notes: String, val brand: String, val company: String, val materialType: String,
+    val removedUnitIds: List<Long> = emptyList(), val date: String = todayStockDate())
 data class ToolEdit(val name: String, val notes: String, val company: String, val images: List<String>,
     val units: List<ToolUnitEdit>, val purchases: List<ToolPurchaseEdit>)
 

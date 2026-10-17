@@ -73,7 +73,7 @@ class MaterialDamageRepositoryTest {
         r.writableDatabase.version = 10
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(12, upgraded.readableDatabase.version)
+            assertEquals(13, upgraded.readableDatabase.version)
             assertEquals(item, upgraded.items(false).single())
             assertTrue(upgraded.damagedMaterials().isEmpty())
         }

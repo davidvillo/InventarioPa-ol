@@ -14,7 +14,8 @@ data class DamagedMaterial(val id: Long, val itemId: Long, val quantity: Double,
     val unitId: Long?, val state: String, val notes: String, val date: String)
 
 internal object MaterialDamage {
-    val movementKinds = MaterialDamageAction.entries.map { it.movement }
+    const val CORRECTION = "Corrección de cantidad"
+    val movementKinds = MaterialDamageAction.entries.map { it.movement } + CORRECTION
 
     fun migrate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE IF NOT EXISTS danos_materiales (
@@ -49,9 +50,14 @@ internal object MaterialDamage {
     }
 
     fun record(db: SQLiteDatabase, item: StockItem, quantity: Double, unit: InventoryUnit?, action: MaterialDamageAction, date: String, notes: String) {
+        recordEvent(db, item, quantity, unit, action.movement, date, notes)
+    }
+
+    fun recordEvent(db: SQLiteDatabase, item: StockItem, quantity: Double, unit: InventoryUnit?, kind: String, date: String, notes: String) {
+        require(kind in movementKinds)
         db.insertOrThrow("eventos_materiales", null, ContentValues().apply {
             put("articulo_id", item.id); put("cantidad", quantity); put("unidad", item.unit)
-            put("fecha", date); put("tipo", action.movement); put("tipo_material", item.materialType)
+            put("fecha", date); put("tipo", kind); put("tipo_material", item.materialType)
             put("observaciones", notes.trim()); put("identificador", unit?.identifier.orEmpty())
             put("marca", unit?.brand.orEmpty()); put("unidad_id", unit?.id)
             put("cantidad_entera", if (item.wholeNumbers) 1 else 0)

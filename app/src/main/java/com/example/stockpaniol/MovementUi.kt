@@ -40,6 +40,11 @@ fun StockOverlay(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> U
     }
 }
 
+@Composable
+internal fun StockPanel(embedded: Boolean, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    if (embedded) Column(Modifier.fillMaxSize(), content = content) else StockOverlay(onDismiss, content)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StockChoice(label: String, value: String, choices: List<Pair<String, String>>, enabled: Boolean = true, onSelect: (String) -> Unit) {
@@ -73,7 +78,8 @@ fun StockDateField(label: String, date: String, enabled: Boolean = true, allowCl
 }
 
 @Composable
-fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
+fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, onDismiss: () -> Unit, onSaved: () -> Unit,
+    onChanged: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var records by remember { mutableStateOf(emptyList<StockItem>()) }
     var workers by remember { mutableStateOf(emptyList<Worker>()) }
@@ -84,11 +90,13 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
     var editUnit by remember { mutableStateOf<InventoryUnit?>(null) }
     var deleteMaterialId by rememberSaveable { mutableStateOf<Long?>(null) }
     var materialDamage by rememberSaveable { mutableStateOf(false) }
+    var editMaterial by rememberSaveable { mutableStateOf(false) }
     var changeMaterialUnit by rememberSaveable { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf("") }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable { mutableStateOf("") }
-    var tab by rememberSaveable { mutableIntStateOf(1) }
+    var tab by rememberSaveable { mutableIntStateOf(if (tools) 0 else 1) }
+    var panelBusy by remember { mutableStateOf(false) }
     var personal by remember { mutableStateOf(false) }
     var revision by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
@@ -101,93 +109,116 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
         loading = false
     }
     val selected = records.firstOrNull { it.id == selectedId }
-    StockOverlay(onDismiss = { if (!busy) onDismiss() }) {
+    val toolEditor = remember(selectedId) { ToolEditorSession() }
+    StockOverlay(onDismiss = { if (!busy && !panelBusy) onDismiss() }) {
         Text(selected?.name ?: if (tools) "Herramienta" else "Material", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        TabRow(tab) {
-            Tab(tab == 0, { tab = 0 }, text = { Text("Detalle") })
-            Tab(tab == 1, { tab = 1 }, text = { Text("Egreso") })
-        }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (tab == 0) {
-                selected?.let {
-                    Text("Disponible: ${formatStockQuantity(it.quantity)} ${it.unit}")
-                    if (!tools) Text("Tipo: ${it.materialType}")
-                    if (tools) { Text("Marcas: ${it.units.map { u -> u.brand }.filter { b -> b.isNotBlank() }.distinct().joinToString(", ").ifBlank { "—" }}"); Text("Empresa: ${it.company.ifBlank { "—" }}") }
-                    Text("Observaciones: ${it.notes.ifBlank { "—" }}")
-                    if (it.individuallyTracked) {
-                        Text("Unidades identificadas", fontWeight = FontWeight.Bold)
-                        it.units.filter { unit -> unit.inActiveStock }.forEach { unit ->
-                            Text("${unit.label} · ${unit.statusLabel}")
-                            if (unit.damageNotes.isNotBlank()) Text("Daño: ${unit.damageNotes}")
-                            if (unit.legacy) Text("Unidad de stock anterior: verificá marca y etiqueta.", style = MaterialTheme.typography.bodySmall)
-                            TextButton(enabled = !busy, onClick = { editUnit = unit }) { Text("Editar marca / identificador") }
-                        }
-                    }
+        if (tools) {
+            TabRow(tab) {
+                listOf("Egreso", "Editar", "Unir/Desunir", "Detalle").forEachIndexed { index, label ->
+                    Tab(tab == index, { tab = index }, enabled = !busy && !panelBusy,
+                        text = { Text(label, style = MaterialTheme.typography.labelSmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center) })
                 }
-            } else {
-                StockChoice(if (tools) "Herramienta" else "Material", selected?.name.orEmpty(), records.map { it.id.toString() to "${it.name} · ${formatStockQuantity(it.quantity)} ${it.unit}" }, !busy) {
-                    selectedId = it.toLong(); quantity = ""; selectedUnits = longArrayOf(); error = ""; deleteError = ""
-                }
-                Text("Disponible: ${formatStockQuantity(selected?.quantity ?: 0.0)} ${selected?.unit.orEmpty()}")
-                if (selected?.individuallyTracked == true) {
-                    Text("Marcá cuáles se entregan", fontWeight = FontWeight.Bold)
-                    selected.availableUnits.forEach { unit ->
-                        UnitSelection(unit.label + if (unit.legacy) " · Verificar etiqueta histórica" else "", unit.id in selectedUnits, !busy) {
-                            selectedUnits = if (unit.id in selectedUnits) selectedUnits.filter { it != unit.id }.toLongArray() else selectedUnits + unit.id
-                        }
-                    }
-                    Text("Cantidad seleccionada: ${selectedUnits.size}")
-                    if (tools) {
-                        val groups = selected.units.filter { it.id in selectedUnits }.mapNotNull { it.bundleId }.toSet()
-                        val companions = records.flatMap { item -> item.units.filter { it.bundleId in groups && it.id !in selectedUnits }.map { item.name to it } }
-                        if (companions.isNotEmpty()) {
-                            Text("También se prestan con el conjunto:", fontWeight = FontWeight.Bold)
-                            companions.forEach { (name, unit) -> Text("$name · ${unit.label} · ${unit.statusLabel}") }
-                        }
-                    }
-                } else OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad (${selected?.unit.orEmpty()})") },
-                    keyboardOptions = KeyboardOptions(keyboardType = if (selected?.wholeNumbers == true) KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
-                StockDateField("Fecha del movimiento", date, !busy) { date = it }
-                PersonnelChoice("Personal que recibe", workers, workerId, !busy) { workerId = it }
-                TextButton(enabled = !busy, onClick = { personal = true }) { Text("Agregar personal de obra") }
-                if (workers.isEmpty()) Text("Registrá primero a la persona que recibe.", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(notes, { notes = it }, enabled = !busy, label = { Text("Observaciones") }, minLines = 2, modifier = Modifier.fillMaxWidth())
             }
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        } else TabRow(tab) {
+            Tab(tab == 0, { tab = 0 }, enabled = !busy, text = { Text("Detalle") })
+            Tab(tab == 1, { tab = 1 }, enabled = !busy, text = { Text("Egreso") })
         }
-        if (!tools && selected != null) {
-            if (selected.individuallyTracked) OutlinedButton(enabled = !busy && !loading,
-                onClick = { changeMaterialUnit = true }, modifier = Modifier.fillMaxWidth()) { Text("Cambiar unidad: ${selected.unit}") }
-            OutlinedButton(enabled = !busy && !loading && selected.quantity > 0,
-                onClick = { materialDamage = true }, modifier = Modifier.fillMaxWidth()) { Text("Registrar daño en pañol") }
-            if (deleteError.isNotBlank()) Text(deleteError, color = MaterialTheme.colorScheme.error)
-            TextButton(enabled = !busy && !loading, onClick = { deleteError = ""; deleteMaterialId = selected.id }) {
-                Text("Eliminar material", color = MaterialTheme.colorScheme.error)
+        if (tools && tab == 1) {
+            Box(Modifier.weight(1f)) { key(selectedId) {
+                ToolEditDialog(selectedId, repository, onDismiss, onSaved, embedded = true,
+                    onBusyChanged = { panelBusy = it }, session = toolEditor)
+            } }
+        } else if (tools && tab == 2) {
+            Box(Modifier.weight(1f)) {
+                ToolBundlesDialog(repository, { tab = 0; revision++ }, { revision++; onChanged() }, embedded = true,
+                    onBusyChanged = { panelBusy = it })
             }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(enabled = !busy, onClick = onDismiss) { Text("Cerrar") }
-            if (tab == 1) Button(enabled = !busy && !loading && selected != null, onClick = {
-                val number = if (selected?.individuallyTracked == true) selectedUnits.size.toDouble() else quantity.trim().replace(',', '.').toDoubleOrNull()
-                error = runCatching {
-                    require(number != null) { "Ingresá una cantidad válida." }
-                    validateMovementQuantity(number, selected!!.unit, selected.wholeNumbers)
-                    require(number <= selected.quantity) { "La cantidad supera el stock disponible (${formatStockQuantity(selected.quantity)} ${selected.unit})." }
-                    require(workerId != 0L) { "Seleccioná la persona que recibe." }
-                }.exceptionOrNull()?.message.orEmpty()
-                if (error.isBlank() && number != null) {
-                    busy = true
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) { runCatching { repository.issue(tools, selectedId, number, date, workerId, notes, selectedUnits.toList()) } }
-                        busy = false
-                        result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudo guardar el egreso."; revision++ }
+        } else {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (!tools && selected != null) OutlinedButton(enabled = !busy && !loading,
+                    onClick = { editMaterial = true }, modifier = Modifier.fillMaxWidth()) { Text("Editar material") }
+                if (if (tools) tab == 3 else tab == 0) {
+                    selected?.let {
+                        Text("Disponible: ${formatStockQuantity(it.quantity)} ${it.unit}")
+                        if (!tools) Text("Tipo: ${it.materialType}")
+                        if (tools) { Text("Marcas: ${it.units.map { u -> u.brand }.filter { b -> b.isNotBlank() }.distinct().joinToString(", ").ifBlank { "—" }}"); Text("Empresa: ${it.company.ifBlank { "—" }}") }
+                        Text("Observaciones: ${it.notes.ifBlank { "—" }}")
+                        if (it.individuallyTracked) {
+                            Text("Unidades identificadas", fontWeight = FontWeight.Bold)
+                            it.units.filter { unit -> unit.inActiveStock }.forEach { unit ->
+                                Text("${unit.label} · ${unit.statusLabel}")
+                                if (unit.damageNotes.isNotBlank()) Text("Daño: ${unit.damageNotes}")
+                                if (unit.legacy) Text("Unidad de stock anterior: verificá marca y etiqueta.", style = MaterialTheme.typography.bodySmall)
+                                TextButton(enabled = !busy, onClick = { editUnit = unit }) { Text("Editar marca / identificador") }
+                            }
+                        }
                     }
+                } else {
+                    StockChoice(if (tools) "Herramienta" else "Material", selected?.name.orEmpty(), records.map { it.id.toString() to "${it.name} · ${formatStockQuantity(it.quantity)} ${it.unit}" }, !busy) {
+                        selectedId = it.toLong(); quantity = ""; selectedUnits = longArrayOf(); error = ""; deleteError = ""
+                    }
+                    Text("Disponible: ${formatStockQuantity(selected?.quantity ?: 0.0)} ${selected?.unit.orEmpty()}")
+                    if (selected?.individuallyTracked == true) {
+                        Text("Marcá cuáles se entregan", fontWeight = FontWeight.Bold)
+                        selected.availableUnits.forEach { unit ->
+                            UnitSelection(unit.label + if (unit.legacy) " · Verificar etiqueta histórica" else "", unit.id in selectedUnits, !busy) {
+                                selectedUnits = if (unit.id in selectedUnits) selectedUnits.filter { it != unit.id }.toLongArray() else selectedUnits + unit.id
+                            }
+                        }
+                        Text("Cantidad seleccionada: ${selectedUnits.size}")
+                        if (tools) {
+                            val groups = selected.units.filter { it.id in selectedUnits }.mapNotNull { it.bundleId }.toSet()
+                            val companions = records.flatMap { item -> item.units.filter { it.bundleId in groups && it.id !in selectedUnits }.map { item.name to it } }
+                            if (companions.isNotEmpty()) {
+                                Text("También se prestan con el conjunto:", fontWeight = FontWeight.Bold)
+                                companions.forEach { (name, unit) -> Text("$name · ${unit.label} · ${unit.statusLabel}") }
+                            }
+                        }
+                    } else OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad (${selected?.unit.orEmpty()})") },
+                        keyboardOptions = KeyboardOptions(keyboardType = if (selected?.wholeNumbers == true) KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+                    StockDateField("Fecha del movimiento", date, !busy) { date = it }
+                    PersonnelChoice("Personal que recibe", workers, workerId, !busy) { workerId = it }
+                    TextButton(enabled = !busy, onClick = { personal = true }) { Text("Agregar personal de obra") }
+                    if (workers.isEmpty()) Text("Registrá primero a la persona que recibe.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(notes, { notes = it }, enabled = !busy, label = { Text("Observaciones") }, minLines = 2, modifier = Modifier.fillMaxWidth())
                 }
-            }) { Text(if (busy) "Guardando…" else "Confirmar egreso") }
+                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+            }
+            if (!tools && selected != null) {
+                if (selected.individuallyTracked) OutlinedButton(enabled = !busy && !loading,
+                    onClick = { changeMaterialUnit = true }, modifier = Modifier.fillMaxWidth()) { Text("Cambiar unidad: ${selected.unit}") }
+                OutlinedButton(enabled = !busy && !loading && selected.quantity > 0,
+                    onClick = { materialDamage = true }, modifier = Modifier.fillMaxWidth()) { Text("Registrar daño en pañol") }
+                if (deleteError.isNotBlank()) Text(deleteError, color = MaterialTheme.colorScheme.error)
+                TextButton(enabled = !busy && !loading, onClick = { deleteError = ""; deleteMaterialId = selected.id }) {
+                    Text("Eliminar material", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(enabled = !busy, onClick = onDismiss) { Text("Cerrar") }
+                if (if (tools) tab == 0 else tab == 1) Button(enabled = !busy && !loading && selected != null, onClick = {
+                    val number = if (selected?.individuallyTracked == true) selectedUnits.size.toDouble() else quantity.trim().replace(',', '.').toDoubleOrNull()
+                    error = runCatching {
+                        require(number != null) { "Ingresá una cantidad válida." }
+                        validateMovementQuantity(number, selected!!.unit, selected.wholeNumbers)
+                        require(number <= selected.quantity) { "La cantidad supera el stock disponible (${formatStockQuantity(selected.quantity)} ${selected.unit})." }
+                        require(workerId != 0L) { "Seleccioná la persona que recibe." }
+                    }.exceptionOrNull()?.message.orEmpty()
+                    if (error.isBlank() && number != null) {
+                        busy = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) { runCatching { repository.issue(tools, selectedId, number, date, workerId, notes, selectedUnits.toList()) } }
+                            busy = false
+                            result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudo guardar el egreso."; revision++ }
+                        }
+                    }
+                }) { Text(if (busy) "Guardando…" else "Confirmar egreso") }
+            }
         }
     }
     if (personal) PersonnelDialog(repository, { personal = false; revision++ })
+    if (editMaterial) MaterialEditDialog(selectedId, repository, { editMaterial = false }, onSaved)
     if (materialDamage && selected != null) MaterialDamageForm(repository, listOf(selected), MaterialDamageAction.DAMAGE,
         null, { materialDamage = false }, onSaved, initialItemId = selected.id)
     if (changeMaterialUnit && selected != null) MaterialUnitDialog(repository, selected, { changeMaterialUnit = false }, onSaved)
@@ -274,18 +305,30 @@ fun sortMovements(rows: List<StockMovement>, column: MovementColumn, descending:
     return rows.sortedWith((if (descending) comparator.reversed() else comparator).thenByDescending { it.id })
 }
 
+internal fun movementBackgroundColor(status: MovementStatus): Color = when (status) {
+    MovementStatus.RETURNED -> Color(0xFFE2F3E5)
+    MovementStatus.LOANED -> Color(0xFFFFF7CC)
+    MovementStatus.IN_REPAIR -> Color(0xFFFFE4C2)
+    MovementStatus.DAMAGED -> Color(0xFFFBDDDD)
+    MovementStatus.REPAIRED -> Color(0xFFEDF3C9)
+    else -> Color.White
+}
+
 @Composable
 fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss: () -> Unit, onChanged: () -> Unit, initialQuery: String = "") {
     val scope = rememberCoroutineScope()
     val columns = movementColumns(tools)
     var rows by remember { mutableStateOf(emptyList<StockMovement>()) }
+    var currentUnits by remember { mutableStateOf(emptyMap<Long, InventoryUnit>()) }
     var revision by remember { mutableIntStateOf(0) }
     var complete by rememberSaveable { mutableStateOf(false) }
+    var tableZoom by rememberSaveable { mutableFloatStateOf(1f) }
     var filters by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var searchColumn by rememberSaveable { mutableStateOf("Todas") }
-    var from by rememberSaveable { mutableStateOf(if (tools && initialQuery.isBlank()) yesterdayStockDate() else "") }
-    var until by rememberSaveable { mutableStateOf(if (tools && initialQuery.isBlank()) todayStockDate() else "") }
+    var from by rememberSaveable { mutableStateOf("") }
+    var until by rememberSaveable { mutableStateOf("") }
+    var stateFilter by rememberSaveable { mutableStateOf(if (initialQuery.isBlank()) MovementStatus.LOANED else MovementStatus.ALL) }
     var kind by rememberSaveable { mutableStateOf("Todos") }
     var category by rememberSaveable { mutableStateOf("Todos") }
     var sortColumn by rememberSaveable { mutableStateOf(MovementColumn.DATE) }
@@ -296,13 +339,17 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
     var busy by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     LaunchedEffect(revision) {
-        runCatching { withContext(Dispatchers.IO) { repository.movements(tools) } }.onSuccess { rows = it }
+        runCatching { withContext(Dispatchers.IO) {
+            repository.movements(tools) to repository.items(tools).flatMap { it.units }.associateBy { it.id }
+        } }.onSuccess { rows = it.first; currentUnits = it.second }
             .onFailure { error = "No se pudieron cargar los movimientos." }
         loading = false
     }
-    val filtered = remember(rows, complete, query, searchColumn, from, until, kind, category, sortColumn, descending) {
+    val statuses = remember(rows, currentUnits) { rows.associate { it.id to movementStatus(it, currentUnits) } }
+    val filtered = remember(rows, statuses, stateFilter, query, searchColumn, from, until, kind, category, sortColumn, descending) {
         sortMovements(rows.filter { m ->
             (from.isBlank() || m.date >= from) && (until.isBlank() || m.date <= until) &&
+                (stateFilter == MovementStatus.ALL || statuses[m.id] == stateFilter) &&
                 (kind == "Todos" || m.kind == kind) && (category == "Todos" || m.materialType == category) &&
                 (if (searchColumn == "Todas") columns.any { it.display(m).contains(query, true) || it.text(m).contains(query, true) }
                 else columns.first { it.name == searchColumn }.let { it.display(m).contains(query, true) || it.text(m).contains(query, true) })
@@ -311,18 +358,16 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
     StockOverlay({ if (!busy) onDismiss() }) {
         Text("Movimientos de ${if (tools) "herramientas" else "materiales"}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = {
-                complete = !complete
-                if (tools) { from = if (complete) "" else yesterdayStockDate(); until = if (complete) "" else todayStockDate() }
-            }) { Text(if (complete) "Vista completa" else "Vista sencilla") }
+            TextButton(onClick = { complete = !complete }) { Text(if (complete) "Vista completa" else "Vista sencilla") }
             TextButton(onClick = { filters = !filters }) { Text(if (filters) "Ocultar filtros" else "Filtros y orden") }
         }
-        if (tools && !complete) Text("Todos los movimientos · ${if (from.isBlank() && until.isBlank()) "Todas las fechas" else if (from == yesterdayStockDate() && until == todayStockDate()) "Ayer y hoy" else "Fechas seleccionadas"}", style = MaterialTheme.typography.bodySmall)
+        Text("${stateFilter.label} · ${if (from.isBlank() && until.isBlank()) "Todas las fechas" else "Fechas seleccionadas"}", style = MaterialTheme.typography.bodySmall)
         if (filters) {
             Column(Modifier.fillMaxWidth().heightIn(max = 230.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 StockChoice("Buscar en", if (searchColumn == "Todas") "Todas las columnas" else columns.first { it.name == searchColumn }.label,
                     listOf("Todas" to "Todas las columnas") + columns.map { it.name to it.label }) { searchColumn = it }
-                OutlinedTextField(query, { query = it }, label = { Text("Texto a filtrar") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(query, { query = it }, label = { Text("Texto a filtrar") }, trailingIcon = { ClearSearchButton(query) { query = "" } }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                StockChoice("Estado", stateFilter.label, MovementStatus.entries.map { it.name to it.label }) { stateFilter = MovementStatus.valueOf(it) }
                 StockChoice("Tipo de movimiento", kind, (listOf("Todos", "Ingreso", "Egreso") + if (tools) ToolLifecycle.movementKinds else listOf("Devolución") + MaterialDamage.movementKinds).map { it to it }) { kind = it }
                 if (!tools) StockChoice("Tipo de material", category, (listOf("Todos") + MaterialTypes.all).map { it to it }) { category = it }
                 StockDateField("Desde", from, allowClear = true) { from = it }
@@ -330,7 +375,7 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                 StockChoice("Ordenar por", sortColumn.label, columns.map { it.name to it.label }) { sortColumn = MovementColumn.valueOf(it) }
                 Row {
                     TextButton(onClick = { descending = !descending }) { Text(if (sortColumn.numeric) { if (descending) "Mayor a menor ↓" else "Menor a mayor ↑" } else if (sortColumn == MovementColumn.DATE || sortColumn == MovementColumn.RETURN_DATE) { if (descending) "Más recientes ↓" else "Más antiguas ↑" } else { if (descending) "Z–A ↓" else "A–Z ↑" }) }
-                    TextButton(onClick = { query = ""; searchColumn = "Todas"; from = ""; until = ""; kind = "Todos"; category = "Todos" }) { Text("Limpiar filtros") }
+                    TextButton(onClick = { query = ""; searchColumn = "Todas"; from = ""; until = ""; kind = "Todos"; category = "Todos"; stateFilter = MovementStatus.ALL }) { Text("Limpiar filtros") }
                 }
             }
         }
@@ -339,49 +384,34 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         if (from.isNotBlank() && until.isNotBlank() && from > until) Text("La fecha desde debe ser anterior o igual a hasta.", color = MaterialTheme.colorScheme.error)
         if (complete) {
-            Column(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-                Row(Modifier.background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp)) {
-                    columns.forEach { column -> Text(column.label + if (column == sortColumn) { if (descending) " ↓" else " ↑" } else " ↕",
-                        Modifier.width(column.width.dp).clickable { descending = column == sortColumn && !descending; sortColumn = column }.padding(vertical = 12.dp), color = Color.White, fontWeight = FontWeight.Bold) }
-                    Text("Eliminar", Modifier.width(64.dp).padding(vertical = 12.dp), color = Color.White)
-                }
-                LazyColumn {
-                    items(filtered, key = { it.id }) { movement ->
-                        Row(Modifier.clickable(enabled = !busy) { selectedId = movement.id }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            columns.forEach { Text(it.display(movement), Modifier.width(it.width.dp).padding(vertical = 12.dp)) }
-                            IconButton(enabled = !busy && !movement.auditProtected, onClick = { deleteId = movement.id }, modifier = Modifier.width(64.dp)) {
-                                Icon(painterResource(R.drawable.ic_delete_image), "Eliminar movimiento ${movement.id}", tint = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                        HorizontalDivider()
+            ZoomableTable(tableZoom, { tableZoom = it }, Modifier.weight(1f).fillMaxWidth()) {
+                Column(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
+                    Row(Modifier.background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp)) {
+                        columns.forEach { column -> Text(column.label + if (column == sortColumn) { if (descending) " ↓" else " ↑" } else " ↕",
+                            Modifier.width(column.width.dp).clickable { descending = column == sortColumn && !descending; sortColumn = column }.padding(vertical = 12.dp), color = Color.White, fontWeight = FontWeight.Bold) }
+                        Text("Eliminar", Modifier.width(64.dp).padding(vertical = 12.dp), color = Color.White)
                     }
-                    if (filtered.isEmpty()) item { Text("No hay movimientos con estos filtros.", Modifier.padding(16.dp)) }
+                    LazyColumn {
+                        items(filtered, key = { it.id }) { movement ->
+                            Row(Modifier.background(movementBackgroundColor(statuses.getValue(movement.id))).clickable(enabled = !busy) { selectedId = movement.id }.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                columns.forEach { column ->
+                                    Text(column.display(movement), Modifier.width(column.width.dp)
+                                        .then(if (column == MovementColumn.ITEM) Modifier.background(cardTitleColor(movementBackgroundColor(statuses.getValue(movement.id)))) else Modifier)
+                                        .padding(vertical = 12.dp), fontWeight = if (column == MovementColumn.ITEM) FontWeight.Bold else null)
+                                }
+                                IconButton(enabled = !busy && !movement.auditProtected, onClick = { deleteId = movement.id }, modifier = Modifier.width(64.dp)) {
+                                    Icon(painterResource(R.drawable.ic_delete_image), "Eliminar movimiento ${movement.id}", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+                        if (filtered.isEmpty()) item { Text("No hay movimientos con estos filtros.", Modifier.padding(16.dp)) }
+                    }
                 }
             }
         } else {
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                items(filtered, key = { it.id }) { movement ->
-                    Card(Modifier.fillMaxWidth().clickable(enabled = !busy) { selectedId = movement.id }) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(movement.itemName, fontWeight = FontWeight.Bold)
-                                if (movement.identitySummary.isNotBlank()) Text(movement.identitySummary)
-                                Text("${movement.kind} · ${displayStockDate(movement.date)}")
-                                Text(movement.person.ifBlank { "—" })
-                                Text("${formatStockQuantity(movement.quantity)} ${movement.unit}")
-                                if (!tools) Text(movement.materialType)
-                                if (movement.kind == "Egreso") Text("Pendiente: ${formatStockQuantity(movement.pending)} ${movement.unit}")
-                                if (tools && movement.returnDate.isNotBlank()) Text("Última devolución: ${displayStockDate(movement.returnDate)}")
-                                if (movement.notes.isNotBlank()) Text(movement.notes, style = MaterialTheme.typography.bodySmall)
-                            }
-                            IconButton(enabled = !busy && !movement.auditProtected, onClick = { deleteId = movement.id }) {
-                                Icon(painterResource(R.drawable.ic_delete_image), "Eliminar movimiento ${movement.id}", tint = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-                }
-                if (filtered.isEmpty()) item { Text("No hay movimientos con estos filtros.", Modifier.padding(16.dp)) }
-            }
+            MovementHistoryCards(filtered, statuses, tools, busy, onSelect = { selectedId = it }, onDelete = { deleteId = it },
+                modifier = Modifier.weight(1f), newestFirst = sortColumn != MovementColumn.DATE || descending)
         }
         TextButton(enabled = !busy, onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Cerrar") }
     }

@@ -107,7 +107,7 @@ class PurchaseRepositoryTest {
                 db.version = 2
             }
             LocalStockRepository(context).use { r ->
-                assertEquals(12, r.readableDatabase.version)
+                assertEquals(13, r.readableDatabase.version)
                 assertEquals("Mi obra", r.stockName)
                 assertEquals(7.5, r.items(false).single().quantity, 0.0)
                 assertEquals(3.0, r.items(true).single().quantity, 0.0)

@@ -10,6 +10,7 @@ interface StockRepository : PersonnelRepository, MeasurementRepository, StockCat
     fun items(tools: Boolean): List<StockItem>
     fun receive(tools: Boolean, entry: StockEntry)
     fun updateTool(itemId: Long, edit: ToolEdit)
+    fun updateMaterial(itemId: Long, edit: MaterialEdit)
     fun deleteTool(itemId: Long)
     fun deleteMaterial(itemId: Long)
     fun updateMaterialUnit(itemId: Long, measurementId: Long)
@@ -32,7 +33,7 @@ interface StockRepository : PersonnelRepository, MeasurementRepository, StockCat
     var stockName: String
 }
 
-class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_paniol.db", null, 12), StockRepository {
+class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_paniol.db", null, 13), StockRepository {
     private val catalogue = LocalStockCatalogueRepository { writableDatabase }
     override fun stockOptions(kind: StockCatalogueKind, includeInactive: Boolean) = catalogue.stockOptions(kind, includeInactive)
     override fun addStockOption(kind: StockCatalogueKind, name: String) = catalogue.addStockOption(kind, name)
@@ -71,6 +72,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         ToolBundles.migrate(db)
         LocalStockCatalogueRepository.migrate(db)
         MaterialDamage.migrate(db)
+        MaterialCorrections.migrate(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
@@ -95,6 +97,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         if (oldVersion < 10) LocalStockCatalogueRepository.migrate(db)
         if (oldVersion < 11) MaterialDamage.migrate(db)
         if (oldVersion < 12) LocalMeasurementRepository.migratePairCounting(db)
+        if (oldVersion < 13) MaterialCorrections.migrate(db)
     }
     private fun unitTable(tools: Boolean) = "unidades_${table(tools)}"
     private fun unitMovementTable(tools: Boolean) = "unidades_movimientos_${table(tools)}"
@@ -194,7 +197,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         val rentals = if (tools && db.version >= 8) ToolRentals.all(db) else emptyMap()
         return db.rawQuery("""SELECT u.id, u.articulo_id, u.identificador, u.marca,
         CASE WHEN m.id IS NOT NULL THEN COALESCE(NULLIF(m.persona, ''), 'Préstamo histórico sin personal') ELSE '' END,
-        u.legado, m.id FROM ${unitTable(tools)} u
+        u.legado, m.id, ${if (!tools && db.version >= 13) "u.descartada_ajuste" else "0"} FROM ${unitTable(tools)} u
         LEFT JOIN ${unitMovementTable(tools)} l ON l.unidad_id=u.id AND l.devuelta=0
         LEFT JOIN ${movementTable(tools)} m ON m.id=l.movimiento_id ORDER BY u.id""", null).use { c ->
         buildList { while (c.moveToNext()) {
@@ -203,7 +206,8 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
             add(InventoryUnit(c.getLong(0), c.getLong(1), c.getString(2), c.getString(3), c.getString(4), c.getInt(5) == 1,
                 if (c.isNull(6)) null else c.getLong(6), state?.condition ?: when (materialState?.state) { "DAMAGED" -> ToolCondition.DAMAGED; "TRASH" -> ToolCondition.RETIRED; else -> ToolCondition.OPERATIVE },
                 state?.damage ?: materialState?.notes.orEmpty(), state?.date ?: materialState?.date.orEmpty(), state?.workshop.orEmpty(), state?.repairDate.orEmpty(), rentals[c.getLong(0)],
-                bundles[c.getLong(0)]?.id, bundles[c.getLong(0)]?.name.orEmpty(), useDamaged = materialState?.state == "USABLE"))
+                bundles[c.getLong(0)]?.id, bundles[c.getLong(0)]?.name.orEmpty(), useDamaged = materialState?.state == "USABLE",
+                excludedByAdjustment = c.getInt(7) == 1))
         } }
     }
     }
@@ -383,6 +387,42 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         }
         edit.units.forEach { catalogue.remember(StockCatalogueKind.BRAND, it.brand) }
         (edit.purchases.map { it.company } + edit.company).forEach { catalogue.remember(StockCatalogueKind.COMPANY, it) }
+    }
+
+    override fun updateMaterial(itemId: Long, edit: MaterialEdit) = transaction { db ->
+        val item = items(false).firstOrNull { it.id == itemId } ?: error("El material ya no existe.")
+        require(edit.name.isNotBlank()) { "Ingresá el nombre del material." }
+        require(items(false).none { it.id != itemId && it.name.equals(edit.name.trim(), true) }) { "Ese nombre ya existe." }
+        require(edit.materialType in MaterialTypes.all) { "Seleccioná un tipo de material válido." }
+        validateStockReceiptQuantity(edit.quantity, item.unit, item.wholeNumbers)
+        require(item.quantity == edit.expectedQuantity) { "La cantidad cambió mientras editabas. Cerrá la ventana y volvé a abrirla." }
+        val delta = stockSum(edit.quantity, -item.quantity)
+        if (delta != 0.0) {
+            validateMovementDate(edit.date)
+            require(edit.date >= movements(false).filter { it.itemId == itemId }.maxOfOrNull { it.date }.orEmpty()) { "La corrección no puede ser anterior al último movimiento del material." }
+        }
+        if (item.individuallyTracked) {
+            require(edit.quantity <= Int.MAX_VALUE) { "La cantidad de unidades es demasiado grande." }
+            val removed = edit.removedUnitIds
+            require(removed.distinct().size == removed.size && removed.size.toDouble() == maxOf(0.0, -delta)) { "Seleccioná exactamente las unidades sobrantes que se retiran al corregir la cantidad." }
+            require(removed.all { id -> item.availableUnits.any { it.id == id } }) { "Solo se pueden corregir unidades disponibles en pañol; los préstamos y daños se conservan." }
+            removed.forEach { id -> db.execSQL("UPDATE unidades_materiales SET descartada_ajuste=1 WHERE id=?", arrayOf(id)) }
+            repeat(maxOf(0.0, delta).toInt()) { createUnit(db, false, itemId, edit.brand, "", null) }
+        } else require(edit.removedUnitIds.isEmpty()) { "Este material se controla por cantidad." }
+        db.update("materiales", ContentValues().apply {
+            put("nombre", edit.name.trim()); put("cantidad", edit.quantity); put("observaciones", edit.notes.trim())
+            put("marca", edit.brand.trim()); put("empresa", edit.company.trim()); put("tipo_material", edit.materialType)
+        }, "id=?", arrayOf(itemId.toString()))
+        if (delta != 0.0) {
+            val notes = "Cantidad disponible corregida: ${formatStockQuantity(item.quantity)} → ${formatStockQuantity(edit.quantity)} ${item.unit}."
+            val originalIds = item.units.map { it.id }.toSet()
+            val changed = inventoryUnits(false, db).filter { it.itemId == itemId && (it.id in edit.removedUnitIds || it.id !in originalIds) }
+            val eventItem = item.copy(materialType = edit.materialType)
+            if (item.individuallyTracked) changed.forEach { unit -> MaterialDamage.recordEvent(db, eventItem, 1.0, unit, MaterialDamage.CORRECTION, edit.date, notes) }
+            else MaterialDamage.recordEvent(db, eventItem, kotlin.math.abs(delta), null, MaterialDamage.CORRECTION, edit.date, notes)
+        }
+        catalogue.remember(StockCatalogueKind.BRAND, edit.brand)
+        catalogue.remember(StockCatalogueKind.COMPANY, edit.company)
     }
 
     override fun deleteTool(itemId: Long) = transaction { db ->

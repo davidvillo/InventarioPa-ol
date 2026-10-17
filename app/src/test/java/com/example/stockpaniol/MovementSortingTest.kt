@@ -25,4 +25,20 @@ class MovementSortingTest {
         assertTrue(MovementColumn.RETURN_DATE in movementColumns(true))
         assertTrue(MovementColumn.PENDING in movementColumns(true))
     }
+
+    @Test fun daySectionsKeepTheChosenOrderWithinEachDayWithoutSplittingDates() {
+        val rows = listOf(row(1, "2026-10-01", "Zoe", 10.0), row(2, "2026-09-30", "Ana", 2.5),
+            row(3, "2026-10-01", "Luis", 1.0), row(4, "2026-09-30", "Pedro", 3.0))
+        val days = groupMovementDays(sortMovements(rows, MovementColumn.PERSON, false))
+        assertEquals(listOf("2026-10-01", "2026-09-30"), days.map { it.date })
+        assertEquals(listOf(3L, 1L), days[0].movements.map { it.id })
+        assertEquals(listOf(2L, 4L), days[1].movements.map { it.id })
+        assertEquals(rows.map { it.id }.toSet(), days.flatMap { it.movements }.map { it.id }.toSet())
+    }
+
+    @Test fun daySectionsCanRunOldestFirstAcrossYearBoundariesAndHandleEmptyHistory() {
+        val rows = listOf(row(1, "2027-01-01", "Ana", 1.0), row(2, "2026-12-31", "Ana", 1.0))
+        assertEquals(listOf("2026-12-31", "2027-01-01"), groupMovementDays(rows, newestFirst = false).map { it.date })
+        assertTrue(groupMovementDays(emptyList()).isEmpty())
+    }
 }

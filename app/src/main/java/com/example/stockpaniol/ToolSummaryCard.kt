@@ -1,6 +1,7 @@
 package com.example.stockpaniol
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -10,31 +11,55 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Constraints
+
+@Composable
+internal fun stockCardTitleHeight(items: List<StockItem>, cardWidth: Dp): Dp {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+    val pixels = with(density) { (cardWidth - 24.dp).roundToPx().coerceAtLeast(1) }
+    val height = remember(items, pixels, style, density.fontScale) {
+        items.maxOfOrNull { measurer.measure(AnnotatedString(it.name), style, constraints = Constraints(maxWidth = pixels)).size.height } ?: 0
+    }
+    return with(density) { height.toDp() }
+}
 
 @Composable
 internal fun StockSummaryCard(item: StockItem, onPhoto: () -> Unit, onEdit: () -> Unit, tools: Boolean = true,
-    onUnitClick: ((InventoryUnit) -> Unit)? = null) {
+    onUnitClick: ((InventoryUnit) -> Unit)? = null, titleMinHeight: Dp = 0.dp) {
     var expanded by rememberSaveable(item.id, tools) { mutableStateOf(false) }
     val tag = if (tools) "tool" else "material"
+    val brands = if (item.individuallyTracked) item.units.filter { it.inActiveStock }.map { it.brand }.filter { it.isNotBlank() }.distinct().joinToString(", ") else item.brand
+    val bodyHeight = with(LocalDensity.current) { MaterialTheme.typography.bodySmall.lineHeight.toDp() * 4 } + 80.dp
     Card(modifier = Modifier.fillMaxWidth().testTag("$tag-card-${item.id}").clickable(onClick = onEdit),
         colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(10.dp)) {
-        Row(Modifier.fillMaxWidth().height(112.dp).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            StockPhoto(item.images.firstOrNull().orEmpty(), Modifier.size(72.dp)
+        Text(item.name, modifier = Modifier.fillMaxWidth().background(cardTitleColor(Color.White))
+            .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 8.dp)
+            .heightIn(min = titleMinHeight).testTag("$tag-title-${item.id}")
+            .clickable(onClickLabel = if (tools) "Abrir herramienta" else "Abrir material", onClick = onEdit),
+            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth().height(bodyHeight).padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.Top) {
+            StockPhoto(item.images.firstOrNull().orEmpty(), Modifier.size(72.dp).testTag("$tag-photo-${item.id}")
                 .clickable(onClickLabel = "Ampliar imagen", onClick = onPhoto))
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
-                Text(item.name, modifier = Modifier.clickable(onClickLabel = if (tools) "Editar herramienta" else "Abrir material", onClick = onEdit),
-                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("$tag-detail-${item.id}"),
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp).fillMaxHeight(), verticalArrangement = Arrangement.Top) {
+                Text("Marca: ${brands.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("Observaciones: ${item.notes.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (item.individuallyTracked) TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("$tag-detail-${item.id}"),
                     contentPadding = PaddingValues(0.dp)) {
                     Text(if (expanded) "Ocultar detalle ▴" else "Ver ${item.units.size} ${if (item.units.size == 1) "unidad" else "unidades"} ▾",
                         color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            Column(Modifier.widthIn(min = 40.dp, max = 88.dp).testTag("$tag-quantity-${item.id}"), horizontalAlignment = Alignment.End) {
                 Text(formatStockQuantity(item.quantity), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 Text(item.unit, color = Color.Gray, style = MaterialTheme.typography.bodySmall)
             }
@@ -42,7 +67,7 @@ internal fun StockSummaryCard(item: StockItem, onPhoto: () -> Unit, onEdit: () -
         if (expanded) {
             HorizontalDivider()
             Column(Modifier.fillMaxWidth().padding(12.dp).testTag("$tag-units-${item.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${item.name} · Todas las unidades", fontWeight = FontWeight.SemiBold)
+                Text("Todas las unidades", fontWeight = FontWeight.SemiBold)
                 item.units.forEach { unit ->
                     val actionable = unit.loanId != null || (tools && unit.condition == ToolCondition.IN_REPAIR)
                     val modifier = if (actionable && onUnitClick != null) Modifier

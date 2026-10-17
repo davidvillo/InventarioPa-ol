@@ -71,7 +71,7 @@ fun MaterialCareDialog(repository: StockRepository, trash: Boolean, onDismiss: (
         Text(if (trash) "Los materiales descartados conservan su historial. Restaurar no los habilita para usar."
             else "Para materiales reutilizables o no. Registrá el daño y elegí si se pueden utilizar dañados o deben ir a la papelera.", style = MaterialTheme.typography.bodySmall)
         if (!trash) Button(enabled = loaded, onClick = { register = true }) { Text("Registrar daño") }
-        OutlinedTextField(query, { query = it }, label = { Text("Buscar material o identificación") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(query, { query = it }, label = { Text("Buscar material o identificación") }, trailingIcon = { ClearSearchButton(query) { query = "" } }, modifier = Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         if (!loaded) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {

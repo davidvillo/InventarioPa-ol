@@ -55,7 +55,7 @@ fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
             Column(Modifier.fillMaxWidth().heightIn(max = 230.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 StockChoice("Buscar en", if (searchColumn == "Todas") "Todas las columnas" else PurchaseColumn.valueOf(searchColumn).label(tools),
                     listOf("Todas" to "Todas las columnas") + columns.map { it.name to it.label(tools) }) { searchColumn = it }
-                OutlinedTextField(query, { query = it }, label = { Text("Texto a filtrar") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(query, { query = it }, label = { Text("Texto a filtrar") }, trailingIcon = { ClearSearchButton(query) { query = "" } }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 StockDateField("Desde", from, allowClear = true) { from = it }
                 StockDateField("Hasta", until, allowClear = true) { until = it }
                 StockChoice("Ordenar por", sortColumn.label(tools), columns.map { it.name to it.label(tools) }) { sortColumn = PurchaseColumn.valueOf(it) }

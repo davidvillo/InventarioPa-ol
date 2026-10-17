@@ -34,7 +34,7 @@ fun PersonnelChoice(label: String, workers: List<Worker>, selectedId: Long, enab
     }
     if (open) StockOverlay({ closePicker() }) {
         Text(label, style = MaterialTheme.typography.titleLarge)
-        OutlinedTextField(search, { search = it }, label = { Text("Buscar nombre, apellido o apodo") },
+        OutlinedTextField(search, { search = it }, label = { Text("Buscar nombre, apellido o apodo") }, trailingIcon = { ClearSearchButton(search) { search = "" } },
             singleLine = true, modifier = Modifier.fillMaxWidth())
         val collator = remember { java.text.Collator.getInstance(java.util.Locale.forLanguageTag("es-AR")).apply { strength = java.text.Collator.PRIMARY } }
         val filtered = workers.filter { it.selectionLabel.contains(search.trim(), true) }
@@ -114,7 +114,7 @@ fun PersonnelDialog(repository: PersonnelRepository, onDismiss: () -> Unit) {
                 }) { Text(if (busy) "Guardando…" else "Guardar personal") }
             }
         } else {
-            OutlinedTextField(search, { search = it }, label = { Text("Buscar nombre, apodo u obra") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(search, { search = it }, label = { Text("Buscar nombre, apodo u obra") }, trailingIcon = { ClearSearchButton(search) { search = "" } }, singleLine = true, modifier = Modifier.fillMaxWidth())
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
             val filtered = workers.filter { it.selectionLabel.contains(search, true) }
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {

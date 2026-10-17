@@ -16,24 +16,33 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+internal class ToolEditorSession {
+    var item by mutableStateOf<StockItem?>(null)
+    var draft by mutableStateOf<ToolEdit?>(null)
+    var sameBrand by mutableStateOf(false)
+}
+
 @Composable
-fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss: () -> Unit,
-    onSaved: () -> Unit, onIssue: () -> Unit) {
+internal fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss: () -> Unit,
+    onSaved: () -> Unit, embedded: Boolean = false, onBusyChanged: (Boolean) -> Unit = {},
+    session: ToolEditorSession = remember(itemId) { ToolEditorSession() }) {
     val scope = rememberCoroutineScope()
-    var item by remember { mutableStateOf<StockItem?>(null) }
-    var draft by remember { mutableStateOf<ToolEdit?>(null) }
+    var item by session::item
+    var draft by session::draft
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
-    var manageBundles by rememberSaveable { mutableStateOf(false) }
     var brands by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
     var companies by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
-    var sameBrand by rememberSaveable { mutableStateOf(false) }
+    var sameBrand by session::sameBrand
+    SideEffect { onBusyChanged(busy) }
+    DisposableEffect(Unit) { onDispose { onBusyChanged(false) } }
     LaunchedEffect(Unit) {
         runCatching { withContext(Dispatchers.IO) { repository.stockOptions(StockCatalogueKind.BRAND) to repository.stockOptions(StockCatalogueKind.COMPANY) } }
             .onSuccess { brands = it.first; companies = it.second }
     }
     LaunchedEffect(itemId) {
+        if (draft != null) return@LaunchedEffect
         runCatching { withContext(Dispatchers.IO) {
             val stock = repository.items(true).first { it.id == itemId }
             stock to ToolEdit(stock.name, stock.notes, stock.company, stock.images,
@@ -51,8 +60,8 @@ fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss: () -> U
             result.onSuccess { onSaved() }.onFailure { error = it.message ?: "No se pudieron guardar los cambios." }
         }
     }
-    StockOverlay(onDismiss = { if (!busy) onDismiss() }) {
-        Text("Editar herramienta", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    StockPanel(embedded, onDismiss = { if (!busy) onDismiss() }) {
+        if (!embedded) Text("Editar herramienta", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             val edit = draft
             if (edit != null) {
@@ -113,8 +122,6 @@ fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss: () -> U
                     }, onError = { error = it }) { open ->
                         TextButton(enabled = !busy && edit.images.size < StockPhotos.LIMIT, onClick = open) { Text("Agregar foto (${edit.images.size}/${StockPhotos.LIMIT})") }
                     }
-                    OutlinedButton(enabled = !busy, onClick = onIssue) { Text("Registrar egreso") }
-                    OutlinedButton(enabled = !busy, onClick = { manageBundles = true }) { Text("Unir / desunir herramientas") }
                     TextButton(enabled = !busy, onClick = { confirmDelete = true }) {
                         Text("Eliminar herramienta", color = MaterialTheme.colorScheme.error)
                     }
@@ -127,7 +134,6 @@ fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss: () -> U
             Button(enabled = !busy && draft != null, onClick = { save() }) { Text(if (busy) "Guardando…" else "Guardar cambios") }
         }
     }
-    if (manageBundles) ToolBundlesDialog(repository, { manageBundles = false; onSaved() }, {})
     if (confirmDelete) AlertDialog(onDismissRequest = { if (!busy) confirmDelete = false },
         title = { Text("¿Eliminar herramienta?") },
         text = { Text("Se eliminará ${item?.name.orEmpty()} con todas sus unidades, ingresos y compras. Esta acción no se puede deshacer.") },

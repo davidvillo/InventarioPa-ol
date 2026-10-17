@@ -16,7 +16,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChanged: () -> Unit) {
+fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChanged: () -> Unit,
+    embedded: Boolean = false, onBusyChanged: (Boolean) -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var bundles by remember { mutableStateOf(emptyList<ToolBundle>()) }
     var stock by remember { mutableStateOf(emptyList<StockItem>()) }
@@ -30,6 +31,8 @@ fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
     var search by rememberSaveable { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf(longArrayOf()) }
     var dissolve by remember { mutableStateOf<ToolBundle?>(null) }
+    SideEffect { onBusyChanged(busy) }
+    DisposableEffect(Unit) { onDispose { onBusyChanged(false) } }
     LaunchedEffect(revision) {
         loading = true
         runCatching { withContext(Dispatchers.IO) { repository.toolBundles() to repository.items(true) } }
@@ -42,13 +45,13 @@ fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
         search = ""; error = ""; form = true
     }
     val units = stock.flatMap { item -> item.units.map { item.name to it } }
-    StockOverlay({ if (!busy) onDismiss() }) {
+    StockPanel(embedded, { if (!busy) onDismiss() }) {
         Text(if (form) "Unir herramientas" else "Conjuntos de herramientas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (form) {
             OutlinedTextField(name, { name = it }, enabled = !busy, label = { Text("Nombre del conjunto *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Text("Seleccioná cada unidad que viaja junta. Por ejemplo, martillo y cincel, o una caja con varias herramientas.", style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(search, { search = it }, label = { Text("Buscar herramienta, marca o identificador") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(search, { search = it }, label = { Text("Buscar herramienta, marca o identificador") }, trailingIcon = { ClearSearchButton(search) { search = "" } }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Text("${selected.size} unidades seleccionadas", fontWeight = FontWeight.Bold)
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(units.filter { (title, unit) -> unit.inActiveStock && (title.contains(search, true) || unit.label.contains(search, true)) }, key = { it.second.id }) { (title, unit) ->

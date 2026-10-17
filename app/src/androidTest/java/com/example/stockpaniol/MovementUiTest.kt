@@ -40,6 +40,12 @@ class MovementUiTest {
         compose.onNodeWithText("☰").performClick()
         compose.onNodeWithText(if (tools) "Movimiento de herramientas" else "Movimientos de materiales").performClick()
     }
+    private fun showAllStatuses() {
+        compose.onNodeWithText("Filtros y orden").performClick()
+        compose.onNodeWithText("Estado").performScrollTo().performClick()
+        compose.onNode(hasText("Todos") and hasAnyAncestor(isPopup())).performClick()
+        compose.onNodeWithText("Ocultar filtros").performClick()
+    }
     private fun scrollHistoryTo(matcher: SemanticsMatcher) {
         compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(isDialog())).performScrollToNode(matcher)
     }
@@ -92,13 +98,18 @@ class MovementUiTest {
         compose.waitUntil(10_000) { repository.items(false).single().quantity == 7.5 }
         compose.waitForIdle()
         openHistory(false)
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("Egreso · ${displayStockDate(todayStockDate())}").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").performClick()
+        val loan = repository.movements(false).first { it.kind == "Egreso" }
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("movement-card-${loan.id}").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("movement-card-${loan.id}").performClick()
         input("Cantidad a devolver (kg)", "2,5")
         compose.onNodeWithText("Confirmar devolución").performClick()
         compose.waitUntil(10_000) { repository.movements(false).any { it.kind == "Devolución" } }
         compose.waitForIdle()
-        compose.onNodeWithText("Devolución · ${displayStockDate(todayStockDate())}").assertIsDisplayed()
+        compose.onNodeWithText("0 movimientos").assertExists()
+        showAllStatuses()
+        val returned = repository.movements(false).first { it.kind == "Devolución" }
+        scrollHistoryTo(hasTestTag("movement-card-${returned.id}"))
+        compose.onNodeWithTag("movement-card-${returned.id}").assertIsDisplayed()
         assertEquals(10.0, repository.items(false).single().quantity, 0.0)
     }
 
@@ -108,45 +119,47 @@ class MovementUiTest {
         val tool = repository.items(true).single()
         repository.receive(true, StockEntry(tool.id, tool.name, 1.0, tool.unit, "", "", todayStockDate(), "", "", ""))
         repository.issue(true, tool.id, 1.0, olderDate, repository.personnel().single().id, "Préstamo anterior", listOf(tool.availableUnits.first().id))
+        val olderLoan = repository.movements(true).first { it.kind == "Egreso" }
         val units = repository.items(true).single().availableUnits.take(3)
         compose.onNodeWithText("Herramientas").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Martillo").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Martillo").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodes(hasSetTextAction() and hasText("Nombre *")).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(isDialog())).performScrollToNode(hasText("Registrar egreso"))
-        compose.onNodeWithText("Registrar egreso").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Confirmar egreso").fetchSemanticsNodes().isNotEmpty() }
         units.forEach { compose.onNodeWithText(it.label).performScrollTo().performClick() }
         selectWorker()
         compose.onNodeWithText("Confirmar egreso").performClick()
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 1.0 }
+        val currentLoan = repository.movements(true).first { it.kind == "Egreso" && it.date == todayStockDate() }
         compose.waitForIdle()
         openHistory(true)
-        compose.onNodeWithText("Todos los movimientos · Ayer y hoy").assertIsDisplayed()
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("4 movimientos").fetchSemanticsNodes().isNotEmpty() }
-        scrollHistoryTo(hasText("Préstamo anterior"))
-        compose.onNodeWithText("Préstamo anterior").assertIsDisplayed()
-        scrollHistoryTo(hasText("Egreso · ${displayStockDate(todayStockDate())}"))
-        compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").performClick()
+        compose.onNodeWithText("Prestadas · Todas las fechas").assertIsDisplayed()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("2 movimientos").fetchSemanticsNodes().isNotEmpty() }
+        scrollHistoryTo(hasTestTag("movement-card-${olderLoan.id}"))
+        compose.onNodeWithTag("movement-card-${olderLoan.id}").assertIsDisplayed()
+        scrollHistoryTo(hasTestTag("movement-card-${currentLoan.id}"))
+        compose.onNodeWithTag("movement-card-${currentLoan.id}").performClick()
         compose.onNodeWithText(units.first().label).performScrollTo().performClick()
         compose.onNodeWithText("Confirmar devolución").performClick()
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 2.0 }
         compose.waitForIdle()
         scrollHistoryTo(hasText("Pendiente: 2 unidades"))
         compose.onNodeWithText("Pendiente: 2 unidades").assertIsDisplayed()
-        compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").performClick()
+        compose.onNodeWithTag("movement-card-${currentLoan.id}").performClick()
         units.drop(1).forEach { compose.onNodeWithText(it.label).performScrollTo().performClick() }
         compose.onNodeWithText("Confirmar devolución").performClick()
         compose.waitUntil(10_000) { repository.items(true).single().quantity == 4.0 }
         compose.waitForIdle()
-        scrollHistoryTo(hasText("Egreso · ${displayStockDate(todayStockDate())}"))
-        compose.onNodeWithText("Egreso · ${displayStockDate(todayStockDate())}").assertExists()
-        scrollHistoryTo(hasText("Préstamo anterior"))
-        compose.onNodeWithText("Préstamo anterior").assertIsDisplayed()
+        compose.onNodeWithText("1 movimientos").assertExists()
+        showAllStatuses()
+        scrollHistoryTo(hasTestTag("movement-card-${currentLoan.id}"))
+        compose.onNodeWithTag("movement-card-${currentLoan.id}").assertExists()
+        scrollHistoryTo(hasTestTag("movement-card-${olderLoan.id}"))
+        compose.onNodeWithTag("movement-card-${olderLoan.id}").assertIsDisplayed()
         compose.onNodeWithText("Filtros y orden").performClick()
         compose.onNodeWithText("Limpiar filtros").performScrollTo().performClick()
         compose.onNodeWithText("Ocultar filtros").performClick()
-        scrollHistoryTo(hasText("Préstamo anterior"))
-        compose.onNodeWithText("Préstamo anterior").assertIsDisplayed()
+        scrollHistoryTo(hasTestTag("movement-card-${olderLoan.id}"))
+        compose.onNodeWithTag("movement-card-${olderLoan.id}").assertIsDisplayed()
         compose.onNodeWithText("Vista sencilla").performClick()
         compose.onNodeWithText("7 movimientos").assertIsDisplayed()
         assertEquals(7, repository.movements(true).size)

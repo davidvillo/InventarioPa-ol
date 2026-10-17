@@ -38,7 +38,7 @@ fun ToolRentalsDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
             FilterChip(!closed, { closed = false }, label = { Text("Alquileres vigentes") })
             FilterChip(closed, { closed = true }, label = { Text("Devueltos al proveedor") })
         }
-        OutlinedTextField(query, { query = it }, label = { Text("Buscar herramienta, proveedor o contrato") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(query, { query = it }, label = { Text("Buscar herramienta, proveedor o contrato") }, trailingIcon = { ClearSearchButton(query) { query = "" } }, modifier = Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         if (!loaded) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {

@@ -35,7 +35,7 @@ internal fun ExistingArticleField(value: String, items: List<StockItem>, enabled
     ExposedDropdownMenuBox(expanded && enabled, { if (enabled) expanded = !expanded }) {
         OutlinedTextField(value, { onQuery(it); expanded = true }, enabled = enabled, singleLine = true,
             label = { Text("Artículo existente") }, placeholder = { Text("Escribí para buscar") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded && enabled) },
+            trailingIcon = { Row { ClearSearchButton(value, enabled) { onQuery(""); expanded = true }; ExposedDropdownMenuDefaults.TrailingIcon(expanded && enabled) } },
             modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, enabled))
         ExposedDropdownMenu(expanded && enabled, { expanded = false }, modifier = Modifier.heightIn(max = 240.dp)) {
             matches.forEach { item ->
@@ -54,7 +54,7 @@ fun StockCatalogueField(label: String, value: String, options: List<StockCatalog
     val showMenu = expanded && enabled && filtered.isNotEmpty()
     ExposedDropdownMenuBox(showMenu, { if (enabled) expanded = !expanded }) {
         OutlinedTextField(value, { onValue(it); expanded = true }, enabled = enabled, singleLine = true,
-            label = { Text(label) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(showMenu) },
+            label = { Text(label) }, trailingIcon = { Row { ClearSearchButton(value, enabled) { onValue(""); expanded = true }; ExposedDropdownMenuDefaults.TrailingIcon(showMenu) } },
             modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, enabled))
         ExposedDropdownMenu(showMenu, { expanded = false }, modifier = Modifier.heightIn(max = 240.dp)) {
             filtered.forEach { option ->
@@ -86,7 +86,7 @@ fun StockCatalogueSettingsDialog(repository: StockCatalogueRepository, kind: Sto
     StockOverlay({ if (!busy) onDismiss() }) {
         Text(kind.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("Cambiar o eliminar una opción no modifica los datos ya guardados.", style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(search, { search = it }, label = { Text("Buscar en ${kind.title.lowercase()}") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(search, { search = it }, label = { Text("Buscar en ${kind.title.lowercase()}") }, trailingIcon = { ClearSearchButton(search) { search = "" } }, singleLine = true, modifier = Modifier.fillMaxWidth())
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         val filtered = options.filter { matchesStockOption(it.name, search) }
         LazyColumn(Modifier.weight(1f).testTag("catalogue-list"), contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

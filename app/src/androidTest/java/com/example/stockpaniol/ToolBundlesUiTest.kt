@@ -34,9 +34,7 @@ class ToolBundlesUiTest {
             compose.waitUntil(10_000) { r.toolBundles().size == 1 }
             compose.onNodeWithText("Cerrar").performClick()
             compose.onNodeWithText("Martillo").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodes(hasSetTextAction() and hasText("Nombre *")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(isDialog())).performScrollToNode(hasText("Registrar egreso"))
-            compose.onNodeWithText("Registrar egreso").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Confirmar egreso").fetchSemanticsNodes().isNotEmpty() }
             val unit = r.items(true).first { it.name == "Martillo" }.units.single()
             compose.waitUntil(10_000) { compose.onAllNodesWithText(unit.label).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(unit.label).performScrollTo().performClick()
@@ -48,9 +46,9 @@ class ToolBundlesUiTest {
             compose.waitUntil(10_000) { r.items(true).all { it.quantity == 0.0 } }
             compose.onNodeWithText("☰").performClick()
             compose.onNodeWithText("Movimiento de herramientas").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodesWithText("Egreso · ${displayStockDate(todayStockDate())}").fetchSemanticsNodes().isNotEmpty() }
-            compose.onAllNodesWithText("Egreso · ${displayStockDate(todayStockDate())}").onFirst().performClick()
             val loan = r.movements(true).first { it.kind == "Egreso" }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("movement-card-${loan.id}").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("movement-card-${loan.id}").performClick()
             val label = loan.units.single().unit.label
             compose.waitUntil(10_000) { compose.onAllNodes(hasText(label) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
             compose.onAllNodes(hasText(label) and hasClickAction()).onLast().performScrollTo().performClick()

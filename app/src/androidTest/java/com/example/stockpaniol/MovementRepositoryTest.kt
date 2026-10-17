@@ -166,7 +166,7 @@ class MovementRepositoryTest {
                 assertEquals(MaterialTypes.CONSTRUCTION, r.items(false).single().materialType)
                 assertEquals("Ingreso", r.movements(false).single().kind)
                 assertEquals("Ingreso", r.movements(true).single().kind)
-                assertEquals(12, r.readableDatabase.version)
+                assertEquals(13, r.readableDatabase.version)
                 assertTrue(r.personnel().isEmpty())
                 r.deleteMovement(false, r.movements(false).single().id)
                 assertEquals(0.0, r.items(false).single().quantity, 0.0)

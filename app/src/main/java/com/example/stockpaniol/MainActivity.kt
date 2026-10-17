@@ -62,6 +62,8 @@ private fun amount(value: Double): String = formatStockQuantity(value)
 fun StockApp(repository: StockRepository) {
     var tools by rememberSaveable { mutableStateOf(false) }
     var complete by rememberSaveable { mutableStateOf(false) }
+    var materialZoom by rememberSaveable { mutableFloatStateOf(1f) }
+    var toolZoom by rememberSaveable { mutableFloatStateOf(1f) }
     var query by rememberSaveable { mutableStateOf("") }
     var materialColumn by rememberSaveable { mutableStateOf(StockColumn.NAME) }
     var toolColumn by rememberSaveable { mutableStateOf(StockColumn.NAME) }
@@ -78,7 +80,6 @@ fun StockApp(repository: StockRepository) {
     var records by remember { mutableStateOf(emptyList<StockItem>()) }
     var revision by remember { mutableIntStateOf(0) }
     var form by rememberSaveable { mutableStateOf(false) }
-    var editToolId by rememberSaveable { mutableStateOf<Long?>(null) }
     var issueItemId by rememberSaveable { mutableStateOf<Long?>(null) }
     var issueTools by rememberSaveable { mutableStateOf(false) }
     var historyTools by rememberSaveable { mutableStateOf<Boolean?>(null) }
@@ -137,7 +138,8 @@ fun StockApp(repository: StockRepository) {
     LaunchedEffect(tools, revision) {
         withContext(Dispatchers.IO) { repository.items(tools) to repository.stockName }.let { records = it.first; title = it.second }
     }
-    val activeRecords = records.filter { !it.individuallyTracked || it.units.isEmpty() || it.units.any { unit -> unit.inActiveStock } }
+    val activeRecords = records.filter { !it.individuallyTracked || it.units.isEmpty() || it.units.any { unit -> unit.inActiveStock } ||
+        (!tools && it.units.any { unit -> unit.excludedByAdjustment }) }
     Scaffold(containerColor = Background, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
         Column {
             TopAppBar(title = { Text(title, modifier = Modifier.clickable { rename = true }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
@@ -184,14 +186,17 @@ fun StockApp(repository: StockRepository) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)
                     .semantics { contentDescription = "Buscar nombre, marca o identificador" },
                 decorationBox = { input ->
-                    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                         .background(Color.White, RoundedCornerShape(8.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.CenterStart) {
-                        if (query.isEmpty()) Text("Buscar nombre, marca o identificador",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        input()
+                        .padding(start = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                            if (query.isEmpty()) Text("Buscar nombre, marca o identificador",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            input()
+                        }
+                        ClearSearchButton(query) { query = "" }
                     }
                 }
             )
@@ -228,65 +233,51 @@ fun StockApp(repository: StockRepository) {
                     }
                 }
             } else if (complete) {
-                Column(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState())) {
-                    Row(Modifier.background(Blue).padding(12.dp)) {
-                        StockColumn.entries.forEach { column ->
-                            Text(column.label + if (column == sortColumn) { if (sortDescending) " ↓" else " ↑" } else " ↕",
-                                Modifier.width(column.width.dp).clickable(onClickLabel = "Ordenar por ${column.label}") {
-                                    selectSort(column, column == sortColumn && !sortDescending)
-                                }.padding(vertical = 8.dp), color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    LazyColumn(contentPadding = PaddingValues(bottom = 100.dp)) {
-                        items(filtered, key = { it.id }) { item ->
-                            Row(Modifier.background(Color.White).clickable {
-                                if (tools) editToolId = item.id else { issueTools = false; issueItemId = item.id }
-                            }.padding(12.dp)) {
-                                StockColumn.entries.forEach { column ->
-                                    val value = when (column) {
-                                        StockColumn.ITEM -> item.id.toString()
-                                        StockColumn.NAME -> item.name + if (item.individuallyTracked) "\n${item.identitySummary}" else ""
-                                        StockColumn.QUANTITY -> amount(item.quantity)
-                                        StockColumn.UNIT -> item.unit
-                                        StockColumn.NOTES -> item.notes.ifBlank { "—" }
-                                    }
-                                    Text(value, Modifier.width(column.width.dp))
-                                }
+                ZoomableTable(if (tools) toolZoom else materialZoom,
+                    { if (tools) toolZoom = it else materialZoom = it }, Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp)) {
+                    Column(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
+                        Row(Modifier.background(Blue).padding(12.dp)) {
+                            StockColumn.entries.forEach { column ->
+                                Text(column.label + if (column == sortColumn) { if (sortDescending) " ↓" else " ↑" } else " ↕",
+                                    Modifier.width(column.width.dp).clickable(onClickLabel = "Ordenar por ${column.label}") {
+                                        selectSort(column, column == sortColumn && !sortDescending)
+                                    }.padding(vertical = 8.dp), color = Color.White, fontWeight = FontWeight.Bold)
                             }
-                            HorizontalDivider()
+                        }
+                        LazyColumn(contentPadding = PaddingValues(bottom = 100.dp)) {
+                            items(filtered, key = { it.id }) { item ->
+                                Row(Modifier.background(Color.White).clickable {
+                                    issueTools = tools; issueItemId = item.id
+                                }.padding(12.dp)) {
+                                    StockColumn.entries.forEach { column ->
+                                        val value = when (column) {
+                                            StockColumn.ITEM -> item.id.toString()
+                                            StockColumn.NAME -> item.name + if (item.individuallyTracked) "\n${item.identitySummary}" else ""
+                                            StockColumn.QUANTITY -> amount(item.quantity)
+                                            StockColumn.UNIT -> item.unit
+                                            StockColumn.NOTES -> item.notes.ifBlank { "—" }
+                                        }
+                                        Text(value, Modifier.width(column.width.dp))
+                                    }
+                                }
+                                HorizontalDivider()
+                            }
                         }
                     }
                 }
             } else {
-                LazyColumn(contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 100.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(filtered, key = { it.id }) { item ->
-                        if (tools || item.individuallyTracked) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    val titleHeight = stockCardTitleHeight(filtered, maxWidth - 32.dp)
+                    LazyColumn(contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 100.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(filtered, key = { it.id }) { item ->
                             StockSummaryCard(item, onPhoto = {
                                 previewName = item.name
                                 previewItemId = item.id
                                 previewTools = tools
                                 previewPhotos = item.images
                             }, onEdit = {
-                                if (tools) editToolId = item.id else { issueTools = false; issueItemId = item.id }
-                            }, tools = tools, onUnitClick = { openUnit(tools, it) })
-                        } else Card(modifier = Modifier.clickable { issueTools = false; issueItemId = item.id }, colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(10.dp)) {
-                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                StockPhoto(item.images.firstOrNull().orEmpty(), Modifier.size(72.dp).clickable(onClickLabel = "Ampliar imagen") {
-                                    previewName = item.name
-                                    previewItemId = item.id
-                                    previewTools = tools
-                                    previewPhotos = item.images
-                                })
-                                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                    Text(item.name, fontWeight = FontWeight.SemiBold)
-                                    if (!item.individuallyTracked && item.brand.isNotBlank()) Text(item.brand, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                                    if (item.individuallyTracked) Text(item.identitySummary, style = MaterialTheme.typography.bodySmall)
-                                }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(amount(item.quantity), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                    Text(item.unit, color = Color.Gray, style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
+                                issueTools = tools; issueItemId = item.id
+                            }, tools = tools, onUnitClick = { openUnit(tools, it) }, titleMinHeight = titleHeight)
                         }
                     }
                 }
@@ -294,13 +285,8 @@ fun StockApp(repository: StockRepository) {
         }
     }
     if (form) EntryDialog(tools, records, repository, onDismiss = { form = false }, onSaved = { form = false; revision++ })
-    editToolId?.let { id -> key(id) {
-        ToolEditDialog(id, repository, onDismiss = { editToolId = null },
-            onSaved = { editToolId = null; revision++ },
-            onIssue = { editToolId = null; issueTools = true; issueItemId = id })
-    } }
     issueItemId?.let { id -> key(issueTools, id) {
-        IssueDialog(issueTools, id, repository, { issueItemId = null }, { issueItemId = null; revision++ })
+        IssueDialog(issueTools, id, repository, { issueItemId = null }, { issueItemId = null; revision++ }, onChanged = { revision++ })
     } }
     historyTools?.let { stockTools -> key(stockTools) {
         MovementHistoryDialog(stockTools, repository, { historyTools = null }, { revision++ })

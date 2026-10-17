@@ -41,7 +41,7 @@ fun ToolCareDialog(repository: StockRepository, trash: Boolean, onDismiss: () ->
         }
         Text(if (trash) "Las bajas conservan su historial. Restaurar las devuelve a dañadas, sin sumarlas al stock disponible."
             else "Las herramientas dañadas o en reparación no están disponibles para entregar.", style = MaterialTheme.typography.bodySmall)
-        if (initialUnitId == null) OutlinedTextField(query, { query = it }, label = { Text("Buscar herramienta, código o taller") }, modifier = Modifier.fillMaxWidth())
+        if (initialUnitId == null) OutlinedTextField(query, { query = it }, label = { Text("Buscar herramienta, código o taller") }, trailingIcon = { ClearSearchButton(query) { query = "" } }, modifier = Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         if (!loaded) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {

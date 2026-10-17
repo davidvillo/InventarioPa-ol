@@ -1,6 +1,8 @@
 package com.example.stockpaniol
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
@@ -10,6 +12,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -87,6 +90,8 @@ class ToolSummaryCardUiTest {
         compose.onNodeWithTag("material-units-1").assertDoesNotExist()
         compose.onNodeWithTag("material-detail-1").performClick()
         compose.onNodeWithTag("material-units-1", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Todas las unidades", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("${item.name} · Todas las unidades", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("ARN 001 · Marca A · Disponible en pañol", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("ARN 002 · Marca B · Disponible en pañol", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("tool-units-1").assertDoesNotExist()
@@ -95,5 +100,39 @@ class ToolSummaryCardUiTest {
         assertEquals(height, compose.onNodeWithTag("material-card-1").fetchSemanticsNode().boundsInRoot.height, 0.1f)
         compose.onNode(hasText(item.name) and hasAnyAncestor(hasTestTag("material-card-1"))).performClick()
         assertEquals(1, materialOpens)
+    }
+
+    @Test fun completeLongTitlesUseFullWidthAboveTheImageAndCardsStayAligned() {
+        val long = StockItem(1, "Taladro percutor inalámbrico profesional con batería y cargador para hormigón", 2.0,
+            "unidades", "Utilizar con protección ocular", "", "Bosch", "", control = StockControl.INDIVIDUAL,
+            units = listOf(InventoryUnit(1, 1, "TAL 001", "Bosch")))
+        val short = long.copy(id = 2, name = "Cincel", notes = "", units = emptyList())
+        compose.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, 1.3f)) { MaterialTheme {
+                BoxWithConstraints(Modifier.width(320.dp)) {
+                    val titleHeight = stockCardTitleHeight(listOf(long, short), maxWidth)
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        StockSummaryCard(long, {}, {}, titleMinHeight = titleHeight)
+                        StockSummaryCard(short, {}, {}, titleMinHeight = titleHeight)
+                    }
+                }
+            } }
+        }
+        val firstHeight = compose.onNodeWithTag("tool-card-1").performScrollTo().fetchSemanticsNode().boundsInRoot.height
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("tool-title-1").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue(layouts.single().lineCount > 1)
+        assertFalse("El título debe mostrar el nombre completo.", layouts.single().hasVisualOverflow)
+        val title = compose.onNodeWithTag("tool-title-1").fetchSemanticsNode().boundsInRoot
+        val image = compose.onNodeWithTag("tool-photo-1").fetchSemanticsNode().boundsInRoot
+        val quantity = compose.onNodeWithTag("tool-quantity-1", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue(title.bottom <= image.top)
+        assertTrue(title.width > image.width)
+        assertEquals(image.top, quantity.top, 1f)
+        compose.onNodeWithText("Marca: Bosch", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("Observaciones: Utilizar con protección ocular", useUnmergedTree = true).assertExists()
+        val secondHeight = compose.onNodeWithTag("tool-card-2").performScrollTo().fetchSemanticsNode().boundsInRoot.height
+        assertEquals(firstHeight, secondHeight, 1f)
     }
 }

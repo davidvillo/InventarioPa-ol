@@ -115,7 +115,7 @@ class ToolBundlesRepositoryTest {
         r.writableDatabase.version = 8
         r.close()
         LocalStockRepository(context).use { reopened ->
-            assertEquals(12, reopened.readableDatabase.version)
+            assertEquals(13, reopened.readableDatabase.version)
             assertEquals(item, reopened.items(true).single())
             assertTrue(reopened.toolBundles().isEmpty())
             assertEquals(listOf("Álvaro", "ana", "Zoe"), reopened.personnel().map { it.name })
