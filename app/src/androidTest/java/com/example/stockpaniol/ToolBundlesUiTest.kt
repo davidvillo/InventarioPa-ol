@@ -47,7 +47,7 @@ class ToolBundlesUiTest {
             compose.onNodeWithText("Confirmar egreso").performClick()
             compose.waitUntil(10_000) { r.items(true).all { it.quantity == 0.0 } }
             compose.onNodeWithText("☰").performClick()
-            compose.onNodeWithText("Movimientos de herramientas").performClick()
+            compose.onNodeWithText("Movimiento de herramientas").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("Egreso · ${displayStockDate(todayStockDate())}").fetchSemanticsNodes().isNotEmpty() }
             compose.onAllNodesWithText("Egreso · ${displayStockDate(todayStockDate())}").onFirst().performClick()
             val loan = r.movements(true).first { it.kind == "Egreso" }

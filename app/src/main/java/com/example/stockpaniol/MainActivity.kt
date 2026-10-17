@@ -83,9 +83,13 @@ fun StockApp(repository: StockRepository) {
     var issueTools by rememberSaveable { mutableStateOf(false) }
     var historyTools by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var purchaseTools by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    var personnel by rememberSaveable { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
     var toolCare by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    var focusedToolId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var returnMovement by remember { mutableStateOf<StockMovement?>(null) }
+    var returnTools by rememberSaveable { mutableStateOf(false) }
+    var returnUnitId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var materialCare by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var rentals by rememberSaveable { mutableStateOf(false) }
     var bundles by rememberSaveable { mutableStateOf(false) }
     var rename by rememberSaveable { mutableStateOf(false) }
@@ -98,6 +102,19 @@ fun StockApp(repository: StockRepository) {
     var previewName by rememberSaveable { mutableStateOf("") }
     var previewItemId by rememberSaveable { mutableLongStateOf(0L) }
     var previewTools by rememberSaveable { mutableStateOf(false) }
+    fun openUnit(targetTools: Boolean, unit: InventoryUnit) {
+        val loanId = unit.loanId
+        if (loanId != null) {
+            scope.launch {
+                runCatching { withContext(Dispatchers.IO) {
+                    repository.movements(targetTools).firstOrNull { it.id == loanId && it.kind == "Egreso" && it.units.any { entry -> entry.unit.id == unit.id && !entry.returned } }
+                        ?: error("El préstamo cambió. Actualizá la lista.")
+                } }.onSuccess {
+                    returnTools = targetTools; returnUnitId = unit.id; returnMovement = it
+                }.onFailure { snackbar.showSnackbar(it.message ?: "No se pudo abrir la devolución.") }
+            }
+        } else if (targetTools && unit.condition == ToolCondition.IN_REPAIR) focusedToolId = unit.id
+    }
     fun savePhotos(targetTools: Boolean, itemId: Long, photos: List<String>) {
         photoBusy = true
         scope.launch {
@@ -120,22 +137,25 @@ fun StockApp(repository: StockRepository) {
     LaunchedEffect(tools, revision) {
         withContext(Dispatchers.IO) { repository.items(tools) to repository.stockName }.let { records = it.first; title = it.second }
     }
-    val activeRecords = records.filter { !tools || it.units.isEmpty() || it.units.any { unit -> unit.inActiveStock } }
+    val activeRecords = records.filter { !it.individuallyTracked || it.units.isEmpty() || it.units.any { unit -> unit.inActiveStock } }
     Scaffold(containerColor = Background, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
         Column {
             TopAppBar(title = { Text(title, modifier = Modifier.clickable { rename = true }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
                 Box {
                     TextButton(onClick = { menu = true }) { Text("☰", color = Color.White, style = MaterialTheme.typography.headlineSmall) }
                     DropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem(text = { Text(if (tools) "Movimientos de herramientas" else "Movimientos de materiales") }, onClick = { menu = false; historyTools = tools })
-                        DropdownMenuItem(text = { Text(if (tools) "Compras de herramientas" else "Compras de materiales") }, onClick = { menu = false; purchaseTools = tools })
-                        DropdownMenuItem(text = { Text("Personal de obra") }, onClick = { menu = false; personnel = true })
+                        DropdownMenuItem(text = { Text(if (tools) "Movimiento de herramientas" else "Movimientos de materiales") }, onClick = { menu = false; historyTools = tools })
+                        DropdownMenuItem(text = { Text(if (tools) "Registro de compras herramientas" else "Registro de compras materiales") }, onClick = { menu = false; purchaseTools = tools })
+                        if (tools) {
+                            DropdownMenuItem(text = { Text("Estado y reparación de herramientas") }, onClick = { menu = false; toolCare = false })
+                            DropdownMenuItem(text = { Text("Unir / desunir herramientas") }, onClick = { menu = false; bundles = true })
+                            DropdownMenuItem(text = { Text("Herramientas alquiladas") }, onClick = { menu = false; rentals = true })
+                            DropdownMenuItem(text = { Text("Papelera de herramientas") }, onClick = { menu = false; toolCare = true })
+                        } else {
+                            DropdownMenuItem(text = { Text("Materiales dañados") }, onClick = { menu = false; materialCare = false })
+                            DropdownMenuItem(text = { Text("Papelera de materiales") }, onClick = { menu = false; materialCare = true })
+                        }
                         DropdownMenuItem(text = { Text("Ajustes") }, onClick = { menu = false; settings = true })
-                        DropdownMenuItem(text = { Text("Cambiar nombre del stock") }, onClick = { menu = false; rename = true })
-                        DropdownMenuItem(text = { Text("Estado y reparación de herramientas") }, onClick = { menu = false; toolCare = false })
-                        DropdownMenuItem(text = { Text("Papelera de herramientas") }, onClick = { menu = false; toolCare = true })
-                        DropdownMenuItem(text = { Text("Herramientas alquiladas") }, onClick = { menu = false; rentals = true })
-                        DropdownMenuItem(text = { Text("Unir / desunir herramientas") }, onClick = { menu = false; bundles = true })
                         DropdownMenuItem(text = { Text("Acerca del almacenamiento") }, onClick = { menu = false; about = true })
                     }
                 }
@@ -164,7 +184,7 @@ fun StockApp(repository: StockRepository) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)
                     .semantics { contentDescription = "Buscar nombre, marca o identificador" },
                 decorationBox = { input ->
-                    Box(Modifier.fillMaxWidth().heightIn(min = 32.dp)
+                    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                         .background(Color.White, RoundedCornerShape(8.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
                         .padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.CenterStart) {
@@ -240,13 +260,15 @@ fun StockApp(repository: StockRepository) {
             } else {
                 LazyColumn(contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 100.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(filtered, key = { it.id }) { item ->
-                        if (tools) {
-                            ToolSummaryCard(item, onPhoto = {
+                        if (tools || item.individuallyTracked) {
+                            StockSummaryCard(item, onPhoto = {
                                 previewName = item.name
                                 previewItemId = item.id
-                                previewTools = true
+                                previewTools = tools
                                 previewPhotos = item.images
-                            }, onEdit = { editToolId = item.id })
+                            }, onEdit = {
+                                if (tools) editToolId = item.id else { issueTools = false; issueItemId = item.id }
+                            }, tools = tools, onUnitClick = { openUnit(tools, it) })
                         } else Card(modifier = Modifier.clickable { issueTools = false; issueItemId = item.id }, colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(10.dp)) {
                             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 StockPhoto(item.images.firstOrNull().orEmpty(), Modifier.size(72.dp).clickable(onClickLabel = "Ampliar imagen") {
@@ -286,9 +308,15 @@ fun StockApp(repository: StockRepository) {
     purchaseTools?.let { stockTools -> key(stockTools) {
         PurchaseHistoryDialog(stockTools, repository, { purchaseTools = null })
     } }
-    if (personnel) PersonnelDialog(repository, { personnel = false })
-    if (settings) SettingsDialog(repository, { settings = false })
+    if (settings) SettingsDialog(repository, { settings = false }, onNameChanged = { title = it })
+    materialCare?.let { trash -> MaterialCareDialog(repository, trash, { materialCare = null }, { revision++ }) }
     toolCare?.let { trash -> ToolCareDialog(repository, trash, { toolCare = null }, { revision++ }) }
+    focusedToolId?.let { id -> key(id) {
+        ToolCareDialog(repository, false, { focusedToolId = null }, { revision++ }, initialUnitId = id)
+    } }
+    returnMovement?.let { movement -> key(returnTools, movement.id, returnUnitId) {
+        ReturnDialog(returnTools, movement, repository, { returnMovement = null }, { returnMovement = null; revision++ }, initialUnitId = returnUnitId)
+    } }
     if (rentals) ToolRentalsDialog(repository, { rentals = false }, { revision++ })
     if (bundles) ToolBundlesDialog(repository, { bundles = false }, { revision++ })
     previewPhotos?.let { photos ->
@@ -297,12 +325,7 @@ fun StockApp(repository: StockRepository) {
             onError = { message -> scope.launch { snackbar.showSnackbar(message) } },
             onDismiss = { previewPhotos = null })
     }
-    if (rename) {
-        var name by remember { mutableStateOf(title) }
-        AlertDialog(onDismissRequest = { rename = false }, title = { Text("Nombre del control de stock") }, text = {
-            Column { OutlinedTextField(name, { name = it }, label = { Text("Nombre") }, singleLine = true); Text("Identifica tu base de datos local.", style = MaterialTheme.typography.bodySmall) }
-        }, confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { scope.launch { withContext(Dispatchers.IO) { repository.stockName = name }; title = name.trim(); rename = false } }) { Text("Guardar") } }, dismissButton = { TextButton(onClick = { rename = false }) { Text("Cancelar") } })
-    }
+    if (rename) StockNameDialog(repository, { rename = false }, { title = it; rename = false })
     if (about) AlertDialog(onDismissRequest = { about = false }, title = { Text("Stock local") }, text = { Text("Los materiales, herramientas e ingresos se guardan en este dispositivo. El nombre identifica esta base. La sincronización por internet y los permisos de administrador se podrán incorporar en una próxima etapa.") }, confirmButton = { TextButton(onClick = { about = false }) { Text("Entendido") } })
 }
 
@@ -331,8 +354,9 @@ internal fun StockPhoto(uri: String, modifier: Modifier = Modifier.size(48.dp), 
 private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: StockRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
     val scope = rememberCoroutineScope()
     var existing by rememberSaveable { mutableStateOf(false) }
-    var selectedId by rememberSaveable { mutableLongStateOf(records.firstOrNull()?.id ?: 0) }
+    var selectedId by rememberSaveable { mutableLongStateOf(0L) }
     val selected = records.firstOrNull { it.id == selectedId }
+    var existingQuery by rememberSaveable { mutableStateOf(selected?.name.orEmpty()) }
     var name by rememberSaveable { mutableStateOf("") }
     var quantity by rememberSaveable { mutableStateOf("") }
     var unit by rememberSaveable { mutableStateOf("unidades") }
@@ -357,10 +381,9 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
     var materialType by rememberSaveable { mutableStateOf(MaterialTypes.CONSTRUCTION) }
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var dropdown by remember { mutableStateOf(false) }
     val individual = tools || if (existing) selected?.individuallyTracked == true else individualMaterial
     val countingUnit = measures.firstOrNull { it.counting }?.name ?: "unidades"
-    val actualUnit = if (existing) selected?.unit.orEmpty() else if (individual) countingUnit else unit
+    val actualUnit = if (existing) selected?.unit.orEmpty() else if (tools) countingUnit else unit
     val selectedMeasure = measures.firstOrNull { it.name == actualUnit }
     val enteredQuantity = quantity.trim().replace(',', '.').toDoubleOrNull()
     val individualCount = if (individual && enteredQuantity != null && enteredQuantity.isFinite() &&
@@ -377,10 +400,9 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
                     }
                     if (records.isEmpty()) Text("Todavía no hay artículos existentes.", style = MaterialTheme.typography.bodySmall)
                     if (existing) {
-                        ExposedDropdownMenuBox(dropdown, { dropdown = !dropdown }) {
-                            OutlinedTextField(selected?.name.orEmpty(), {}, readOnly = true, label = { Text("Artículo existente") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(dropdown) }, modifier = Modifier.fillMaxWidth().menuAnchor())
-                            ExposedDropdownMenu(dropdown, { dropdown = false }) { records.forEach { item -> DropdownMenuItem(text = { Text(item.name) }, onClick = { selectedId = item.id; dropdown = false }) } }
-                        }
+                        ExistingArticleField(existingQuery, records, !busy,
+                            onQuery = { existingQuery = it; selectedId = 0L; error = "" },
+                            onSelect = { selectedId = it.id; existingQuery = it.name; error = "" })
                     } else OutlinedTextField(name, { name = it }, label = { Text("Nombre *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     if (tools) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -396,13 +418,17 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
                         if (existing) Text("Tipo de material: ${selected?.materialType.orEmpty()}")
                         else StockChoice("Tipo de material", materialType, MaterialTypes.all.map { it to it }, !busy) { materialType = it }
                         if (!existing) Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(individualMaterial, { individualMaterial = it; if (it) unit = "unidades" }, enabled = !busy)
+                            Checkbox(individualMaterial, { individualMaterial = it; if (it) unit = countingUnit }, enabled = !busy)
                             Text("Identificar cada unidad (reutilizable)")
                         }
                     }
                     OutlinedTextField(quantity, { quantity = it; error = "" }, enabled = !busy, label = { Text("Cantidad a ingresar *") }, keyboardOptions = KeyboardOptions(keyboardType = if (individual) KeyboardType.Number else KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
                     Text("Podés ingresar 0 para guardar el artículo sin agregar stock.", style = MaterialTheme.typography.bodySmall)
-                    if (individual || existing) OutlinedTextField(actualUnit, {}, readOnly = true, label = { Text("Unidad (fija)") }, modifier = Modifier.fillMaxWidth())
+                    if (tools || existing) OutlinedTextField(actualUnit, {}, readOnly = true, label = { Text("Unidad (fija)") }, modifier = Modifier.fillMaxWidth())
+                    else if (individual) {
+                        StockChoice("Unidad del material reutilizable", actualUnit, measures.filter { it.identifiesMaterial }.map { it.name to it.name }, !busy) { unit = it }
+                        if (selectedMeasure?.pairs == true) Text("Cada identificador representa un par completo. La cantidad se expresa en pares.", style = MaterialTheme.typography.bodySmall)
+                    }
                     else {
                         Text("Unidad")
                         androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -460,6 +486,7 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
                         val number = enteredQuantity
                         val actualName = if (existing) selected?.name.orEmpty() else name.trim()
                         error = when {
+                            existing && selected == null -> "Elegí un artículo de las coincidencias."
                             actualName.isBlank() -> "Ingresá el nombre del artículo."
                             tools && rented && company.isBlank() -> "Ingresá el proveedor del alquiler."
                             number == null || !number.isFinite() || number < 0 -> "Ingresá una cantidad igual o mayor a cero."

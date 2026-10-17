@@ -31,6 +31,7 @@ class PersonnelUiTest {
     }
     private fun openMenu(label: String) {
         compose.onNodeWithText("☰").performClick()
+        if (label == "Personal de obra") compose.onNodeWithText("Ajustes").performClick()
         compose.onNodeWithText(label).performClick()
     }
     private fun chooseSite(name: String) {
@@ -86,6 +87,7 @@ class PersonnelUiTest {
         compose.onNodeWithText("Guardar personal").performClick()
         compose.waitUntil(10_000) { repository.personnel().size == 1 }
         compose.waitForIdle()
+        compose.onNodeWithText("Cerrar").performClick()
         compose.onNodeWithText("Cerrar").performClick()
         openMenu("Ajustes")
         compose.onNodeWithText("Obras").performClick()

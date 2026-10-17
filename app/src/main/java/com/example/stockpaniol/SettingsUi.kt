@@ -15,17 +15,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsDialog(repository: StockRepository, onDismiss: () -> Unit) {
+fun SettingsDialog(repository: StockRepository, onDismiss: () -> Unit, onNameChanged: (String) -> Unit = {}) {
     var section by rememberSaveable { mutableStateOf<String?>(null) }
     when (section) {
+        "personal" -> PersonnelDialog(repository, { section = null })
+        "nombre" -> StockNameDialog(repository, { section = null }, { onNameChanged(it); section = null })
         "obras" -> WorksitesDialog(repository, { section = null })
         "unidades" -> MeasurementSettingsDialog(repository, { section = null })
         "marcas" -> StockCatalogueSettingsDialog(repository, StockCatalogueKind.BRAND, { section = null })
         "empresas" -> StockCatalogueSettingsDialog(repository, StockCatalogueKind.COMPANY, { section = null })
         else -> StockOverlay(onDismiss) {
             Text("Ajustes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text("Administrá las opciones disponibles en los formularios.")
+            Text("Administrá el personal, el nombre del stock y las opciones de los formularios.")
             Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = { section = "personal" }, modifier = Modifier.fillMaxWidth()) { Text("Personal de obra") }
+            OutlinedButton(onClick = { section = "nombre" }, modifier = Modifier.fillMaxWidth()) { Text("Cambiar nombre del stock") }
             OutlinedButton(onClick = { section = "obras" }, modifier = Modifier.fillMaxWidth()) { Text("Obras") }
             OutlinedButton(onClick = { section = "unidades" }, modifier = Modifier.fillMaxWidth()) { Text("Unidades") }
             OutlinedButton(onClick = { section = "marcas" }, modifier = Modifier.fillMaxWidth()) { Text("Marcas") }
@@ -34,6 +38,33 @@ fun SettingsDialog(repository: StockRepository, onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text("Cerrar") }
         }
     }
+}
+
+@Composable
+internal fun StockNameDialog(repository: StockRepository, onDismiss: () -> Unit, onSaved: (String) -> Unit) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var loaded by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        runCatching { withContext(Dispatchers.IO) { repository.stockName } }
+            .onSuccess { name = it; loaded = true }.onFailure { error = "No se pudo cargar el nombre del stock." }
+    }
+    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Nombre del control de stock") }, text = {
+        Column {
+            OutlinedTextField(name, { name = it }, enabled = loaded && !busy, label = { Text("Nombre") }, singleLine = true)
+            Text("Identifica tu base de datos local.", style = MaterialTheme.typography.bodySmall)
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        }
+    }, confirmButton = { TextButton(enabled = loaded && !busy && name.isNotBlank(), onClick = {
+        busy = true
+        scope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { repository.stockName = name.trim() } }
+            busy = false
+            result.onSuccess { onSaved(name.trim()) }.onFailure { error = "No se pudo guardar el nombre del stock." }
+        }
+    }) { Text("Guardar") } }, dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancelar") } })
 }
 
 @Composable
@@ -83,7 +114,7 @@ fun MeasurementSettingsDialog(repository: MeasurementRepository, onDismiss: () -
         Column {
             OutlinedTextField(name, { name = it }, enabled = !busy, label = { Text("Nombre de la unidad *") }, singleLine = true)
             Row {
-                Checkbox(whole, { whole = it }, enabled = !busy && rows.firstOrNull { it.id == editId }?.counting != true)
+                Checkbox(whole, { whole = it }, enabled = !busy && rows.firstOrNull { it.id == editId }?.let { it.counting || it.pairs } != true)
                 Text("Solo cantidades enteras")
             }
             Text("Cambiar el nombre no convierte las cantidades. Los movimientos anteriores conservan su unidad original.", style = MaterialTheme.typography.bodySmall)

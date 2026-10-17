@@ -9,7 +9,7 @@ fun validateStockReceiptQuantity(quantity: Double, unit: String, wholeNumbers: B
 }
 
 sealed interface InventoryPolicy {
-    fun validateReceipt(quantity: Double, unit: String, identifier: String, wholeNumbers: Boolean = unit in listOf("unidades", "pares"), counting: Boolean = unit == "unidades")
+    fun validateReceipt(quantity: Double, unit: String, identifier: String, wholeNumbers: Boolean = unit in listOf("unidades", "pares"), counting: Boolean = unit in listOf("unidades", "pares"))
     fun validateSelection(quantity: Double, selectedIds: List<Long>)
 
     object ByQuantity : InventoryPolicy {
@@ -26,7 +26,7 @@ sealed interface InventoryPolicy {
         override fun validateReceipt(quantity: Double, unit: String, identifier: String, wholeNumbers: Boolean, counting: Boolean) {
             validateStockReceiptQuantity(quantity, unit, true)
             require(quantity <= Int.MAX_VALUE) { "La cantidad de unidades es demasiado grande." }
-            require(counting) { "Los artículos identificados se registran en unidades." }
+            require(counting) { "Los artículos identificados requieren unidades o pares habilitados para su control." }
             require(identifier.isBlank() || quantity == 1.0) { "Ingresá una unidad por cada identificador personalizado." }
         }
         override fun validateSelection(quantity: Double, selectedIds: List<Long>) {
@@ -41,10 +41,10 @@ data class InventoryUnit(val id: Long, val itemId: Long, val identifier: String,
     val holder: String = "", val legacy: Boolean = false, val loanId: Long? = null,
     val condition: ToolCondition = ToolCondition.OPERATIVE, val damageNotes: String = "", val statusDate: String = "",
     val repairPlace: String = "", val repairDate: String = "", val rental: ToolRental? = null,
-    val bundleId: Long? = null, val bundleName: String = "") {
+    val bundleId: Long? = null, val bundleName: String = "", val useDamaged: Boolean = false) {
     val available: Boolean get() = loanId == null && condition == ToolCondition.OPERATIVE && rental?.closed != true
     val inActiveStock: Boolean get() = condition != ToolCondition.RETIRED && rental?.closed != true
-    val statusLabel: String get() = if (rental?.closed == true) "Alquiler devuelto al proveedor" else if (loanId != null) "Prestada a $holder" else condition.label
+    val statusLabel: String get() = if (rental?.closed == true) "Alquiler devuelto al proveedor" else if (loanId != null) "Prestada a $holder" else if (useDamaged) "Disponible · utilizar dañado" else condition.label
     val label: String get() = (listOf(brand, identifier) + listOfNotNull(rental?.let { "Alquilada: ${it.supplier}" }, bundleName.takeIf { it.isNotBlank() }?.let { "Conjunto: $it" })).filter { it.isNotBlank() }.joinToString(" · ")
 }
 

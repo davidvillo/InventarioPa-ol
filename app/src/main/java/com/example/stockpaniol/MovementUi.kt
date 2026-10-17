@@ -82,6 +82,10 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
     var quantity by rememberSaveable { mutableStateOf("") }
     var selectedUnits by rememberSaveable { mutableStateOf(longArrayOf()) }
     var editUnit by remember { mutableStateOf<InventoryUnit?>(null) }
+    var deleteMaterialId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var materialDamage by rememberSaveable { mutableStateOf(false) }
+    var changeMaterialUnit by rememberSaveable { mutableStateOf(false) }
+    var deleteError by remember { mutableStateOf("") }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable { mutableStateOf("") }
     var tab by rememberSaveable { mutableIntStateOf(1) }
@@ -123,7 +127,7 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
                 }
             } else {
                 StockChoice(if (tools) "Herramienta" else "Material", selected?.name.orEmpty(), records.map { it.id.toString() to "${it.name} · ${formatStockQuantity(it.quantity)} ${it.unit}" }, !busy) {
-                    selectedId = it.toLong(); quantity = ""; selectedUnits = longArrayOf(); error = ""
+                    selectedId = it.toLong(); quantity = ""; selectedUnits = longArrayOf(); error = ""; deleteError = ""
                 }
                 Text("Disponible: ${formatStockQuantity(selected?.quantity ?: 0.0)} ${selected?.unit.orEmpty()}")
                 if (selected?.individuallyTracked == true) {
@@ -152,6 +156,16 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
             }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         }
+        if (!tools && selected != null) {
+            if (selected.individuallyTracked) OutlinedButton(enabled = !busy && !loading,
+                onClick = { changeMaterialUnit = true }, modifier = Modifier.fillMaxWidth()) { Text("Cambiar unidad: ${selected.unit}") }
+            OutlinedButton(enabled = !busy && !loading && selected.quantity > 0,
+                onClick = { materialDamage = true }, modifier = Modifier.fillMaxWidth()) { Text("Registrar daño en pañol") }
+            if (deleteError.isNotBlank()) Text(deleteError, color = MaterialTheme.colorScheme.error)
+            TextButton(enabled = !busy && !loading, onClick = { deleteError = ""; deleteMaterialId = selected.id }) {
+                Text("Eliminar material", color = MaterialTheme.colorScheme.error)
+            }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cerrar") }
             if (tab == 1) Button(enabled = !busy && !loading && selected != null, onClick = {
@@ -174,6 +188,23 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
         }
     }
     if (personal) PersonnelDialog(repository, { personal = false; revision++ })
+    if (materialDamage && selected != null) MaterialDamageForm(repository, listOf(selected), MaterialDamageAction.DAMAGE,
+        null, { materialDamage = false }, onSaved, initialItemId = selected.id)
+    if (changeMaterialUnit && selected != null) MaterialUnitDialog(repository, selected, { changeMaterialUnit = false }, onSaved)
+    deleteMaterialId?.let { targetId ->
+        AlertDialog(onDismissRequest = { if (!busy) deleteMaterialId = null },
+            title = { Text("¿Eliminar material?") },
+            text = { Text("Se eliminará ${records.firstOrNull { it.id == targetId }?.name.orEmpty()} con todas sus unidades, ingresos y compras. Esta acción no se puede deshacer.") },
+            confirmButton = { TextButton(enabled = !busy, onClick = {
+                busy = true
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) { runCatching { repository.deleteMaterial(targetId) } }
+                    busy = false; deleteMaterialId = null
+                    result.onSuccess { onSaved() }.onFailure { deleteError = it.message ?: "No se pudo eliminar el material." }
+                }
+            }) { Text("Eliminar definitivamente") } },
+            dismissButton = { TextButton(enabled = !busy, onClick = { deleteMaterialId = null }) { Text("Cancelar") } })
+    }
     editUnit?.let { unit ->
         IdentifyUnitDialog(tools, unit, repository, { editUnit = null }, { editUnit = null; revision++ })
     }
@@ -292,7 +323,7 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                 StockChoice("Buscar en", if (searchColumn == "Todas") "Todas las columnas" else columns.first { it.name == searchColumn }.label,
                     listOf("Todas" to "Todas las columnas") + columns.map { it.name to it.label }) { searchColumn = it }
                 OutlinedTextField(query, { query = it }, label = { Text("Texto a filtrar") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                StockChoice("Tipo de movimiento", kind, (listOf("Todos", "Ingreso", "Egreso") + if (tools) ToolLifecycle.movementKinds else listOf("Devolución")).map { it to it }) { kind = it }
+                StockChoice("Tipo de movimiento", kind, (listOf("Todos", "Ingreso", "Egreso") + if (tools) ToolLifecycle.movementKinds else listOf("Devolución") + MaterialDamage.movementKinds).map { it to it }) { kind = it }
                 if (!tools) StockChoice("Tipo de material", category, (listOf("Todos") + MaterialTypes.all).map { it to it }) { category = it }
                 StockDateField("Desde", from, allowClear = true) { from = it }
                 StockDateField("Hasta", until, allowClear = true) { until = it }
@@ -372,12 +403,13 @@ fun MovementHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
 }
 
 @Composable
-fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepository, onDismiss: () -> Unit, onSaved: () -> Unit) {
+fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepository, onDismiss: () -> Unit, onSaved: () -> Unit,
+    initialUnitId: Long? = null) {
     val scope = rememberCoroutineScope()
     var workers by remember { mutableStateOf(emptyList<Worker>()) }
     var workerId by rememberSaveable { mutableStateOf(movement.workerId ?: 0L) }
     var quantity by rememberSaveable { mutableStateOf("") }
-    var selectedUnits by rememberSaveable { mutableStateOf(longArrayOf()) }
+    var selectedUnits by rememberSaveable { mutableStateOf(initialUnitId?.let { longArrayOf(it) } ?: longArrayOf()) }
     var damagedUnits by rememberSaveable { mutableStateOf(longArrayOf()) }
     var damageNotes by rememberSaveable { mutableStateOf(listOf<String>()) }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
@@ -385,12 +417,21 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var loanUnits by remember { mutableStateOf(emptyList<ToolLoanUnit>()) }
+    var shortcutSelectionApplied by rememberSaveable { mutableStateOf(false) }
     var loadingUnits by remember { mutableStateOf(tools && movement.kind == "Egreso") }
     LaunchedEffect(Unit) {
         if (!tools) runCatching { withContext(Dispatchers.IO) { repository.personnel(true).filter { it.active || it.id == movement.workerId } } }.onSuccess { workers = it }.onFailure { error = "No se pudo cargar el personal." }
         if (tools && movement.kind == "Egreso") {
             runCatching { withContext(Dispatchers.IO) { repository.toolLoanUnits(movement.id) } }
-                .onSuccess { loanUnits = it }
+                .onSuccess { units ->
+                    loanUnits = units
+                    if (initialUnitId != null && !shortcutSelectionApplied) {
+                        val selected = units.firstOrNull { it.unit.id == initialUnitId }
+                        selectedUnits = if (selected?.bundleLoan != null) units.filter { it.bundleLoan == selected.bundleLoan }.map { it.unit.id }.toLongArray()
+                            else if (selected != null) longArrayOf(initialUnitId) else longArrayOf()
+                        shortcutSelectionApplied = true
+                    }
+                }
                 .onFailure { error = "No se pudieron cargar las herramientas del préstamo." }
             loadingUnits = false
         }
@@ -414,7 +455,7 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
             }
             if (canReturn) {
                 Text("Cargar devolución", style = MaterialTheme.typography.titleMedium)
-                if (tools) Text("Marcá las unidades dañadas y explicá qué les pasó. Se cierra su préstamo, pero no vuelven al stock disponible.", style = MaterialTheme.typography.bodySmall)
+                if (movement.individuallyTracked) Text("Marcá las unidades dañadas y explicá qué les pasó. Se cierra su préstamo, pero no vuelven al stock disponible.", style = MaterialTheme.typography.bodySmall)
                 if (!tools) PersonnelChoice("Persona que devuelve", workers, workerId, !busy) { workerId = it }
                 if (movement.individuallyTracked) {
                     Text("Marcá cuáles vuelven al pañol", fontWeight = FontWeight.Bold)
@@ -428,7 +469,7 @@ fun ReturnDialog(tools: Boolean, movement: StockMovement, repository: StockRepos
                             selectedUnits = if (entry.unit.id in selectedUnits) selectedUnits.filter { it !in linked }.toLongArray() else (selectedUnits.toList() + linked).distinct().toLongArray()
                             damagedUnits = damagedUnits.filter { it in selectedUnits }.toLongArray()
                         }
-                        if (tools && entry.unit.id in selectedUnits) {
+                        if (entry.unit.id in selectedUnits) {
                             UnitSelection("Dañada: ${entry.unit.label}", entry.unit.id in damagedUnits, !busy) {
                                 damagedUnits = if (entry.unit.id in damagedUnits) damagedUnits.filter { it != entry.unit.id }.toLongArray() else damagedUnits + entry.unit.id
                             }

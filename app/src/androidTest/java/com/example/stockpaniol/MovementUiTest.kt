@@ -38,7 +38,7 @@ class MovementUiTest {
     }
     private fun openHistory(tools: Boolean) {
         compose.onNodeWithText("☰").performClick()
-        compose.onNodeWithText("Movimientos de ${if (tools) "herramientas" else "materiales"}").performClick()
+        compose.onNodeWithText(if (tools) "Movimiento de herramientas" else "Movimientos de materiales").performClick()
     }
     private fun scrollHistoryTo(matcher: SemanticsMatcher) {
         compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(isDialog())).performScrollToNode(matcher)
@@ -46,6 +46,7 @@ class MovementUiTest {
 
     @Test fun personnelFormAndMaterialCategoryAreAvailableForNewIssues() {
         compose.onNodeWithText("☰").performClick()
+        compose.onNodeWithText("Ajustes").performClick()
         compose.onNodeWithText("Personal de obra").performClick()
         compose.onNodeWithText("Agregar personal").performClick()
         input("Nombre *", "Luis")
@@ -57,6 +58,7 @@ class MovementUiTest {
         compose.waitUntil(10_000) { repository.personnel().size == 2 }
         compose.waitForIdle()
         compose.onNodeWithText("Luis Pérez (Lucho)").assertIsDisplayed()
+        compose.onNodeWithText("Cerrar").performClick()
         compose.onNodeWithText("Cerrar").performClick()
         compose.onNodeWithText("+ Agregar material").performClick()
         input("Nombre *", "Guantes")

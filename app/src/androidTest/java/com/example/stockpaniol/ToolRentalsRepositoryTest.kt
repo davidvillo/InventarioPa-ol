@@ -117,7 +117,7 @@ class ToolRentalsRepositoryTest {
         r.writableDatabase.version = 7
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(10, upgraded.readableDatabase.version)
+            assertEquals(12, upgraded.readableDatabase.version)
             assertEquals(before, upgraded.items(true).single())
             assertEquals(history, upgraded.movements(true))
             upgraded.receive(true, entry())

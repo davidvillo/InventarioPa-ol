@@ -60,6 +60,7 @@ class ToolLifecycleUiTest {
     @Test fun repairAndTrashMenusCompletePhysicalLifecycleAndLogEachChange() {
         repository.returnStock(true, loan.id, 1.0, todayStockDate(), null, "", listOf(unit.id), mapOf(unit.id to "Motor quemado"))
         compose.setContent { MaterialTheme { StockApp(repository) } }
+        compose.onNodeWithText("Herramientas").performClick()
         compose.onNodeWithText("☰").performClick()
         compose.onNodeWithText("Estado y reparación de herramientas").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Enviar a reparar").fetchSemanticsNodes().isNotEmpty() }

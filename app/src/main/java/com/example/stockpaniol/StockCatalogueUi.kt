@@ -28,6 +28,26 @@ fun SameBrandCheckbox(checked: Boolean, enabled: Boolean, onChecked: (Boolean) -
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+internal fun ExistingArticleField(value: String, items: List<StockItem>, enabled: Boolean,
+    onQuery: (String) -> Unit, onSelect: (StockItem) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val matches = items.filter { matchesStockOption(it.name, value) || matchesStockOption(it.identitySummary, value) }
+    ExposedDropdownMenuBox(expanded && enabled, { if (enabled) expanded = !expanded }) {
+        OutlinedTextField(value, { onQuery(it); expanded = true }, enabled = enabled, singleLine = true,
+            label = { Text("Artículo existente") }, placeholder = { Text("Escribí para buscar") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded && enabled) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, enabled))
+        ExposedDropdownMenu(expanded && enabled, { expanded = false }, modifier = Modifier.heightIn(max = 240.dp)) {
+            matches.forEach { item ->
+                DropdownMenuItem(text = { Text(item.name) }, onClick = { onSelect(item); expanded = false })
+            }
+            if (matches.isEmpty()) DropdownMenuItem(text = { Text("Sin coincidencias") }, enabled = false, onClick = {})
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun StockCatalogueField(label: String, value: String, options: List<StockCatalogueOption>, enabled: Boolean = true, onValue: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val filtered = options.filter { it.active && matchesStockOption(it.name, value) }

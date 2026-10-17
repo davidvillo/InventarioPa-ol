@@ -22,6 +22,8 @@ class InventoryPolicyTest {
     @Test fun individualStockRequiresExactDistinctSelection() {
         InventoryPolicy.ByUnit.validateReceipt(1.0, "unidades", "BOSCH-01")
         InventoryPolicy.ByUnit.validateReceipt(3.0, "unidades", "")
+        InventoryPolicy.ByUnit.validateReceipt(2.0, "pares", "")
+        rejects { InventoryPolicy.ByUnit.validateReceipt(1.5, "pares", "") }
         InventoryPolicy.ByUnit.validateSelection(2.0, listOf(1L, 2L))
         rejects { InventoryPolicy.ByUnit.validateReceipt(2.0, "unidades", "BOSCH-01") }
         rejects { InventoryPolicy.ByUnit.validateReceipt(1.0, "kg", "") }

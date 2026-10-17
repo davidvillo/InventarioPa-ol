@@ -62,7 +62,7 @@ class PurchaseUiTest {
             compose.waitUntil(10_000) { repository.purchases(tools).size == 1 }
             compose.waitForIdle()
             compose.onNodeWithText("☰").performClick()
-            val title = "Compras de ${if (tools) "herramientas" else "materiales"}"
+            val title = "Registro de compras ${if (tools) "herramientas" else "materiales"}"
             compose.onNodeWithText(title).performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("1 compras").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Fecha ↓").assertExists()

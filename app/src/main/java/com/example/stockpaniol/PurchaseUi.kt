@@ -46,7 +46,7 @@ fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
         }, sortColumn, descending)
     }
     StockOverlay(onDismiss) {
-        Text("Compras de ${if (tools) "herramientas" else "materiales"}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("Registro de compras ${if (tools) "herramientas" else "materiales"}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = { complete = !complete }) { Text(if (complete) "Vista completa" else "Vista sencilla") }
             TextButton(onClick = { filters = !filters }) { Text(if (filters) "Ocultar filtros" else "Filtros y orden") }

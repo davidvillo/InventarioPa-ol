@@ -111,7 +111,7 @@ class ToolLifecycleRepositoryTest {
         r.writableDatabase.version = 6
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(10, upgraded.readableDatabase.version)
+            assertEquals(12, upgraded.readableDatabase.version)
             assertEquals(before, upgraded.items(true).single())
             assertEquals(1.0, upgraded.movements(true).first { it.id == loan.id }.pending, 0.0)
             upgraded.returnStock(true, loan.id, 1.0, date, null, "", listOf(item.units.last().id), mapOf(item.units.last().id to "Rota"))

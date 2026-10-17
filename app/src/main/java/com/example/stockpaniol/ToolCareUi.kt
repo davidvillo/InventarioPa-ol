@@ -16,7 +16,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun ToolCareDialog(repository: StockRepository, trash: Boolean, onDismiss: () -> Unit, onChanged: () -> Unit) {
+fun ToolCareDialog(repository: StockRepository, trash: Boolean, onDismiss: () -> Unit, onChanged: () -> Unit,
+    initialUnitId: Long? = null) {
     var records by remember { mutableStateOf(emptyList<StockItem>()) }
     var revision by remember { mutableIntStateOf(0) }
     var condition by rememberSaveable { mutableStateOf(if (trash) ToolCondition.RETIRED else ToolCondition.DAMAGED) }
@@ -30,16 +31,17 @@ fun ToolCareDialog(repository: StockRepository, trash: Boolean, onDismiss: () ->
             .onSuccess { records = it; error = "" }.onFailure { error = it.message ?: "No se pudieron cargar las herramientas." }
         loaded = true
     }
-    val rows = records.flatMap { item -> item.units.filter { it.loanId == null && it.condition == condition && it.rental?.closed != true }.map { item.name to it } }
+    val rows = records.flatMap { item -> item.units.filter { it.loanId == null &&
+        (if (initialUnitId != null) it.id == initialUnitId else it.condition == condition) && it.rental?.closed != true }.map { item.name to it } }
         .filter { (name, unit) -> name.contains(query, true) || unit.label.contains(query, true) || unit.repairPlace.contains(query, true) }
     StockOverlay(onDismiss) {
         Text(if (trash) "Papelera de herramientas" else "Estado y reparación de herramientas", style = MaterialTheme.typography.titleLarge)
-        if (!trash) StockChoice("Estado", condition.label, ToolCondition.entries.filter { it != ToolCondition.RETIRED }.map { it.name to it.label }) {
+        if (!trash && initialUnitId == null) StockChoice("Estado", condition.label, ToolCondition.entries.filter { it != ToolCondition.RETIRED }.map { it.name to it.label }) {
             condition = ToolCondition.valueOf(it)
         }
         Text(if (trash) "Las bajas conservan su historial. Restaurar las devuelve a dañadas, sin sumarlas al stock disponible."
             else "Las herramientas dañadas o en reparación no están disponibles para entregar.", style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(query, { query = it }, label = { Text("Buscar herramienta, código o taller") }, modifier = Modifier.fillMaxWidth())
+        if (initialUnitId == null) OutlinedTextField(query, { query = it }, label = { Text("Buscar herramienta, código o taller") }, modifier = Modifier.fillMaxWidth())
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         if (!loaded) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
