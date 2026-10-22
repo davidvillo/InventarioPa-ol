@@ -36,7 +36,7 @@ internal fun ExistingArticleField(value: String, items: List<StockItem>, enabled
         OutlinedTextField(value, { onQuery(it); expanded = true }, enabled = enabled, singleLine = true,
             label = { Text("Artículo existente") }, placeholder = { Text("Escribí para buscar") },
             trailingIcon = { Row { ClearSearchButton(value, enabled) { onQuery(""); expanded = true }; ExposedDropdownMenuDefaults.TrailingIcon(expanded && enabled) } },
-            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, enabled))
+            modifier = Modifier.fillMaxWidth().then(if (enabled) Modifier.menuAnchor() else Modifier))
         ExposedDropdownMenu(expanded && enabled, { expanded = false }, modifier = Modifier.heightIn(max = 240.dp)) {
             matches.forEach { item ->
                 DropdownMenuItem(text = { Text(item.name) }, onClick = { onSelect(item); expanded = false })
@@ -55,7 +55,7 @@ fun StockCatalogueField(label: String, value: String, options: List<StockCatalog
     ExposedDropdownMenuBox(showMenu, { if (enabled) expanded = !expanded }) {
         OutlinedTextField(value, { onValue(it); expanded = true }, enabled = enabled, singleLine = true,
             label = { Text(label) }, trailingIcon = { Row { ClearSearchButton(value, enabled) { onValue(""); expanded = true }; ExposedDropdownMenuDefaults.TrailingIcon(showMenu) } },
-            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable, enabled))
+            modifier = Modifier.fillMaxWidth().then(if (enabled) Modifier.menuAnchor() else Modifier))
         ExposedDropdownMenu(showMenu, { expanded = false }, modifier = Modifier.heightIn(max = 240.dp)) {
             filtered.forEach { option ->
                 DropdownMenuItem(text = { Text(option.name) }, onClick = { onValue(option.name); expanded = false })
@@ -76,7 +76,7 @@ fun StockCatalogueSettingsDialog(repository: StockCatalogueRepository, kind: Sto
     var editId by rememberSaveable { mutableStateOf<Long?>(null) }
     var deleteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var name by rememberSaveable { mutableStateOf("") }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     LaunchedEffect(kind, revision) {
         loading = true
         runCatching { withContext(Dispatchers.IO) { repository.stockOptions(kind) } }
@@ -105,7 +105,7 @@ fun StockCatalogueSettingsDialog(repository: StockCatalogueRepository, kind: Sto
             }
             if (filtered.isEmpty() && !loading) item { Text(if (options.isEmpty()) "Todavía no hay opciones registradas." else "No hay coincidencias.") }
         }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cerrar") }
             Button(enabled = !busy && !loading, onClick = { editId = null; name = ""; form = true; error = "" }) { Text("Agregar ${kind.singular}") }
@@ -114,7 +114,7 @@ fun StockCatalogueSettingsDialog(repository: StockCatalogueRepository, kind: Sto
     if (form) AlertDialog(onDismissRequest = { if (!busy) form = false }, title = { Text("${if (editId == null) "Agregar" else "Modificar"} ${kind.singular}") },
         text = { Column {
             OutlinedTextField(name, { name = it }, enabled = !busy, label = { Text("Nombre de la ${kind.singular} *") }, singleLine = true)
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         } }, confirmButton = { TextButton(enabled = !busy, onClick = {
             busy = true
             val target = editId

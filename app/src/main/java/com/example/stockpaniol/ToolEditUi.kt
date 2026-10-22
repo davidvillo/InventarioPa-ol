@@ -30,7 +30,7 @@ internal fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss
     var item by session::item
     var draft by session::draft
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     var brands by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
     var companies by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
@@ -68,7 +68,7 @@ internal fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss
                 item {
                     OutlinedTextField(edit.name, { draft = edit.copy(name = it) }, enabled = !busy,
                         label = { Text("Nombre *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Text("Disponible: ${formatStockQuantity(item?.quantity ?: 0.0)} ${item?.unit.orEmpty()}")
+                    Text("Disponible: ${formatStockAmount(item?.quantity ?: 0.0, item?.unit.orEmpty())}")
                     Text("La cantidad se actualiza con los ingresos y egresos.", style = MaterialTheme.typography.bodySmall)
                     StockCatalogueField("Empresa a la que se compró", edit.company, companies, !busy) { draft = edit.copy(company = it) }
                     OutlinedTextField(edit.notes, { draft = edit.copy(notes = it) }, enabled = !busy,
@@ -128,7 +128,7 @@ internal fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss
                 }
             } else if (error.isBlank()) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancelar") }
             Button(enabled = !busy && draft != null, onClick = { save() }) { Text(if (busy) "Guardando…" else "Guardar cambios") }

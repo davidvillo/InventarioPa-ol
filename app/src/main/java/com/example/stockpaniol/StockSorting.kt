@@ -22,5 +22,5 @@ fun sortStock(items: List<StockItem>, column: StockColumn, descending: Boolean):
             StockColumn.NOTES -> collator.compare(a.notes, b.notes)
         }
     }
-    return items.sortedWith((if (descending) comparator.reversed() else comparator).thenBy { it.id })
+    return items.sortedWith((if (descending) Comparator { a, b -> comparator.compare(b, a) } else comparator).thenBy { it.id })
 }

@@ -83,7 +83,6 @@ class MovementRepositoryTest {
             assertEquals("2026-10-13", loan.returnDate)
             assertEquals(5, reopened.movements(true).size)
             assertEquals("Obra norte", reopened.personnel().single().worksite)
-            assertRejected { reopened.deleteMovement(true, outgoing.id) }
             assertEquals(4.0, reopened.items(true).single().quantity, 0.0)
         }
     }
@@ -166,7 +165,7 @@ class MovementRepositoryTest {
                 assertEquals(MaterialTypes.CONSTRUCTION, r.items(false).single().materialType)
                 assertEquals("Ingreso", r.movements(false).single().kind)
                 assertEquals("Ingreso", r.movements(true).single().kind)
-                assertEquals(13, r.readableDatabase.version)
+                assertEquals(14, r.readableDatabase.version)
                 assertTrue(r.personnel().isEmpty())
                 r.deleteMovement(false, r.movements(false).single().id)
                 assertEquals(0.0, r.items(false).single().quantity, 0.0)

@@ -76,7 +76,7 @@ class ToolLifecycleRepositoryTest {
         }
     }
 
-    @Test fun invalidTransitionsMissingDamageDetailsAndDeletingAuditHistoryAreRejectedAtomically() = withRepository { r, _ ->
+    @Test fun invalidTransitionsMissingDamageDetailsAndReferencedIncomeDeletionAreRejectedAtomically() = withRepository { r, _ ->
         val item = prepare(r)
         val unit = item.units.first()
         val loan = r.movements(true).first { it.kind == "Egreso" }
@@ -91,8 +91,6 @@ class ToolLifecycleRepositoryTest {
         rejects { r.changeToolState(unit.id, ToolAction.REPAIRED, date, "") }
         rejects { r.changeToolState(unit.id, ToolAction.SEND_REPAIR, date, "", "") }
         rejects { r.changeToolState(unit.id, ToolAction.SEND_REPAIR, "2026-10-13", "", "Taller") }
-        rejects { r.deleteMovement(true, loan.id) }
-        rejects { r.deleteMovement(true, r.movements(true).first { it.kind == "Devolución dañada" }.id) }
         rejects { r.deleteMovement(true, r.movements(true).first { it.kind == "Ingreso" }.id) }
         assertEquals(3, r.movements(true).size)
         checkStock(r, 0.0)
@@ -111,7 +109,7 @@ class ToolLifecycleRepositoryTest {
         r.writableDatabase.version = 6
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(13, upgraded.readableDatabase.version)
+            assertEquals(14, upgraded.readableDatabase.version)
             assertEquals(before, upgraded.items(true).single())
             assertEquals(1.0, upgraded.movements(true).first { it.id == loan.id }.pending, 0.0)
             upgraded.returnStock(true, loan.id, 1.0, date, null, "", listOf(item.units.last().id), mapOf(item.units.last().id to "Rota"))

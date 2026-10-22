@@ -67,7 +67,7 @@ fun PersonnelDialog(repository: PersonnelRepository, onDismiss: () -> Unit) {
     var manageWorksites by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     var revision by remember { mutableIntStateOf(0) }
     LaunchedEffect(revision) {
         runCatching { withContext(Dispatchers.IO) { repository.personnel() to repository.worksites(true) } }
@@ -95,7 +95,7 @@ fun PersonnelDialog(repository: PersonnelRepository, onDismiss: () -> Unit) {
                 TextButton(enabled = !busy, onClick = { manageWorksites = true }) { Text("Administrar opciones de obra") }
                 if (choices.isEmpty()) Text("Agregá una opción de obra para registrar personal.")
                 OutlinedTextField(nickname, { nickname = it }, enabled = !busy, label = { Text("Apodo") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(enabled = !busy, onClick = { form = false; error = "" }) { Text("Cancelar") }
@@ -115,7 +115,7 @@ fun PersonnelDialog(repository: PersonnelRepository, onDismiss: () -> Unit) {
             }
         } else {
             OutlinedTextField(search, { search = it }, label = { Text("Buscar nombre, apodo u obra") }, trailingIcon = { ClearSearchButton(search) { search = "" } }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
             val filtered = workers.filter { it.selectionLabel.contains(search, true) }
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
                 items(filtered, key = { it.id }) { worker ->
@@ -164,7 +164,7 @@ fun WorksitesDialog(repository: PersonnelRepository, onDismiss: () -> Unit) {
     var deleteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var name by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     LaunchedEffect(revision) {
         runCatching { withContext(Dispatchers.IO) { repository.worksites() } }.onSuccess { rows = it }
             .onFailure { error = "No se pudieron cargar las obras." }
@@ -174,7 +174,7 @@ fun WorksitesDialog(repository: PersonnelRepository, onDismiss: () -> Unit) {
         Text("Obras", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("Opciones de la lista desplegable de personal.", style = MaterialTheme.typography.bodySmall)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         LazyColumn(Modifier.weight(1f).testTag("worksites-list"), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
             items(rows, key = { it.id }) { site ->
                 Card(Modifier.fillMaxWidth()) {
@@ -197,7 +197,7 @@ fun WorksitesDialog(repository: PersonnelRepository, onDismiss: () -> Unit) {
     if (form) AlertDialog(onDismissRequest = { if (!busy) form = false }, title = { Text(if (editId == null) "Agregar opción de obra" else "Modificar opción de obra") }, text = {
         Column {
             OutlinedTextField(name, { name = it }, enabled = !busy, label = { Text("Nombre de la opción *") }, singleLine = true)
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         }
     }, confirmButton = { TextButton(enabled = !busy, onClick = {
         busy = true

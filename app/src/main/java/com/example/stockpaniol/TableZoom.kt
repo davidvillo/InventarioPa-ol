@@ -16,6 +16,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Density
 
 /** Remeasure the table at its new scale so its scroll ranges and touch targets follow the zoom. */
+internal const val DEFAULT_COMPLETE_TABLE_ZOOM = 0.7f
+
 @Composable
 internal fun ZoomableTable(scale: Float, onScaleChange: (Float) -> Unit, modifier: Modifier = Modifier,
     content: @Composable () -> Unit) {

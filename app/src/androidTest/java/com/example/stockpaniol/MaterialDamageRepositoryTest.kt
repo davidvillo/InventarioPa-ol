@@ -31,7 +31,6 @@ class MaterialDamageRepositoryTest {
         assertEquals(10.5, r.items(false).single().quantity, 0.0)
         assertTrue(runCatching { r.changeMaterialState(id, MaterialDamageAction.USE, 2.5, date, "Otra vez", damageId = damage.id) }.isFailure)
         assertEquals(4, r.movements(false).count { it.id < 0 })
-        assertTrue(runCatching { r.deleteMovement(false, r.movements(false).first().id) }.isFailure)
         assertTrue(runCatching { r.deleteMaterial(id) }.isFailure)
         LocalStockRepository(context).use { reopened ->
             assertEquals("USABLE", reopened.damagedMaterials().single().state)
@@ -73,7 +72,7 @@ class MaterialDamageRepositoryTest {
         r.writableDatabase.version = 10
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(13, upgraded.readableDatabase.version)
+            assertEquals(14, upgraded.readableDatabase.version)
             assertEquals(item, upgraded.items(false).single())
             assertTrue(upgraded.damagedMaterials().isEmpty())
         }
@@ -98,7 +97,6 @@ class MaterialDamageRepositoryTest {
         val damage = r.damagedMaterials().single()
         assertEquals(ids.first(), damage.unitId)
         assertEquals("Hebilla rota", damage.notes)
-        assertTrue(runCatching { r.deleteMovement(false, loan.id) }.isFailure)
         LocalStockRepository(context).use { reopened ->
             assertEquals(1.0, reopened.items(false).single().quantity, 0.0)
             assertEquals(ToolCondition.DAMAGED, reopened.items(false).single().units.first().condition)

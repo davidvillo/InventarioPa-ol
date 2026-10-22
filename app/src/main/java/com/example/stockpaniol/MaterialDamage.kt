@@ -42,20 +42,21 @@ internal object MaterialDamage {
     fun register(db: SQLiteDatabase, item: StockItem, quantity: Double, unit: InventoryUnit?, date: String, notes: String) {
         // Keep immutable events when a previously usable damaged unit is damaged again.
         unit?.let { db.delete("danos_materiales", "unidad_id=? AND estado='USABLE'", arrayOf(it.id.toString())) }
-        db.insertOrThrow("danos_materiales", null, ContentValues().apply {
+        val damageId = db.insertOrThrow("danos_materiales", null, ContentValues().apply {
             put("articulo_id", item.id); put("cantidad", quantity); put("unidad_id", unit?.id)
             put("estado", "DAMAGED"); put("observaciones", notes.trim()); put("fecha", date)
         })
-        record(db, item, quantity, unit, MaterialDamageAction.DAMAGE, date, notes)
+        record(db, item, quantity, unit, MaterialDamageAction.DAMAGE, date, notes, damageId)
     }
 
-    fun record(db: SQLiteDatabase, item: StockItem, quantity: Double, unit: InventoryUnit?, action: MaterialDamageAction, date: String, notes: String) {
-        recordEvent(db, item, quantity, unit, action.movement, date, notes)
+    fun record(db: SQLiteDatabase, item: StockItem, quantity: Double, unit: InventoryUnit?, action: MaterialDamageAction, date: String, notes: String, damageId: Long? = null) {
+        val id = recordEvent(db, item, quantity, unit, action.movement, date, notes)
+        damageId?.let { db.execSQL("INSERT OR REPLACE INTO configuracion VALUES (?, ?)", arrayOf("dano_evento_$id", it.toString())) }
     }
 
-    fun recordEvent(db: SQLiteDatabase, item: StockItem, quantity: Double, unit: InventoryUnit?, kind: String, date: String, notes: String) {
+    fun recordEvent(db: SQLiteDatabase, item: StockItem, quantity: Double, unit: InventoryUnit?, kind: String, date: String, notes: String): Long {
         require(kind in movementKinds)
-        db.insertOrThrow("eventos_materiales", null, ContentValues().apply {
+        return db.insertOrThrow("eventos_materiales", null, ContentValues().apply {
             put("articulo_id", item.id); put("cantidad", quantity); put("unidad", item.unit)
             put("fecha", date); put("tipo", kind); put("tipo_material", item.materialType)
             put("observaciones", notes.trim()); put("identificador", unit?.identifier.orEmpty())

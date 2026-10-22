@@ -3,6 +3,8 @@ package com.example.stockpaniol
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -15,7 +17,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsDialog(repository: StockRepository, onDismiss: () -> Unit, onNameChanged: (String) -> Unit = {}) {
+fun SettingsDialog(repository: StockRepository, onDismiss: () -> Unit, onNameChanged: (String) -> Unit = {},
+    onStockAlertsChanged: (Boolean) -> Unit = {}) {
     var section by rememberSaveable { mutableStateOf<String?>(null) }
     when (section) {
         "personal" -> PersonnelDialog(repository, { section = null })
@@ -24,17 +27,27 @@ fun SettingsDialog(repository: StockRepository, onDismiss: () -> Unit, onNameCha
         "unidades" -> MeasurementSettingsDialog(repository, { section = null })
         "marcas" -> StockCatalogueSettingsDialog(repository, StockCatalogueKind.BRAND, { section = null })
         "empresas" -> StockCatalogueSettingsDialog(repository, StockCatalogueKind.COMPANY, { section = null })
+        "aviso_stock" -> StockAlertsDialog(repository, { section = null }, onStockAlertsChanged)
+        "acerca" -> AppGuideDialog { section = null }
+        "almacenamiento" -> {
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as StockApplication
+            StorageDialog(app.storage, { section = null })
+        }
         else -> StockOverlay(onDismiss) {
             Text("Ajustes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text("Administrá el personal, el nombre del stock y las opciones de los formularios.")
             Spacer(Modifier.height(16.dp))
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             OutlinedButton(onClick = { section = "personal" }, modifier = Modifier.fillMaxWidth()) { Text("Personal de obra") }
             OutlinedButton(onClick = { section = "nombre" }, modifier = Modifier.fillMaxWidth()) { Text("Cambiar nombre del stock") }
             OutlinedButton(onClick = { section = "obras" }, modifier = Modifier.fillMaxWidth()) { Text("Obras") }
             OutlinedButton(onClick = { section = "unidades" }, modifier = Modifier.fillMaxWidth()) { Text("Unidades") }
             OutlinedButton(onClick = { section = "marcas" }, modifier = Modifier.fillMaxWidth()) { Text("Marcas") }
             OutlinedButton(onClick = { section = "empresas" }, modifier = Modifier.fillMaxWidth()) { Text("Empresas") }
-            Spacer(Modifier.weight(1f))
+            OutlinedButton(onClick = { section = "aviso_stock" }, modifier = Modifier.fillMaxWidth()) { Text("Aviso de control de stock") }
+            OutlinedButton(onClick = { section = "almacenamiento" }, modifier = Modifier.fillMaxWidth()) { Text("Almacenamiento") }
+            OutlinedButton(onClick = { section = "acerca" }, modifier = Modifier.fillMaxWidth()) { Text("Acerca de la aplicación") }
+            }
             TextButton(onClick = onDismiss) { Text("Cerrar") }
         }
     }
@@ -45,7 +58,7 @@ internal fun StockNameDialog(repository: StockRepository, onDismiss: () -> Unit,
     var name by rememberSaveable { mutableStateOf("") }
     var loaded by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
         runCatching { withContext(Dispatchers.IO) { repository.stockName } }
@@ -55,7 +68,7 @@ internal fun StockNameDialog(repository: StockRepository, onDismiss: () -> Unit,
         Column {
             OutlinedTextField(name, { name = it }, enabled = loaded && !busy, label = { Text("Nombre") }, singleLine = true)
             Text("Identifica tu base de datos local.", style = MaterialTheme.typography.bodySmall)
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         }
     }, confirmButton = { TextButton(enabled = loaded && !busy && name.isNotBlank(), onClick = {
         busy = true
@@ -79,7 +92,7 @@ fun MeasurementSettingsDialog(repository: MeasurementRepository, onDismiss: () -
     var name by rememberSaveable { mutableStateOf("") }
     var whole by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     LaunchedEffect(revision) {
         runCatching { withContext(Dispatchers.IO) { repository.measurements() } }
             .onSuccess { rows = it }.onFailure { error = "No se pudieron cargar las unidades." }
@@ -89,7 +102,7 @@ fun MeasurementSettingsDialog(repository: MeasurementRepository, onDismiss: () -
         Text("Unidades", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("Unidades de medida para materiales.", style = MaterialTheme.typography.bodySmall)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         LazyColumn(Modifier.weight(1f).testTag("measurement-units-list"), contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(rows, key = { it.id }) { unit ->
                 Card(Modifier.fillMaxWidth()) {
@@ -118,7 +131,7 @@ fun MeasurementSettingsDialog(repository: MeasurementRepository, onDismiss: () -
                 Text("Solo cantidades enteras")
             }
             Text("Cambiar el nombre no convierte las cantidades. Los movimientos anteriores conservan su unidad original.", style = MaterialTheme.typography.bodySmall)
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         }
     }, confirmButton = { TextButton(enabled = !busy, onClick = {
         busy = true

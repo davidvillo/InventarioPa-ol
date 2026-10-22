@@ -56,7 +56,8 @@ data class MovementUnit(val unit: InventoryUnit, val returned: Boolean) {
 data class StockItem(val id: Long, val name: String, val quantity: Double, val unit: String,
     val notes: String, val image: String, val brand: String, val company: String,
     val materialType: String = MaterialTypes.CONSTRUCTION, val control: StockControl = StockControl.QUANTITY,
-    val units: List<InventoryUnit> = emptyList(), val wholeNumbers: Boolean = unit in listOf("unidades", "pares")) {
+    val units: List<InventoryUnit> = emptyList(), val wholeNumbers: Boolean = unit in listOf("unidades", "pares"),
+    val stockThreshold: Double = 5.0) {
     val individuallyTracked: Boolean get() = control == StockControl.INDIVIDUAL
     val images: List<String> get() = StockPhotos.decode(image)
     val policy: InventoryPolicy get() = if (individuallyTracked) InventoryPolicy.ByUnit else InventoryPolicy.ByQuantity
@@ -71,11 +72,12 @@ data class ToolPurchaseEdit(val id: Long, val date: String, val receipt: String,
 
 data class MaterialEdit(val name: String, val quantity: Double, val expectedQuantity: Double,
     val notes: String, val brand: String, val company: String, val materialType: String,
-    val removedUnitIds: List<Long> = emptyList(), val date: String = todayStockDate())
+    val removedUnitIds: List<Long> = emptyList(), val date: String = todayStockDate(), val stockThreshold: Double? = null)
 data class ToolEdit(val name: String, val notes: String, val company: String, val images: List<String>,
     val units: List<ToolUnitEdit>, val purchases: List<ToolPurchaseEdit>)
 
 data class StockEntry(val itemId: Long, val name: String, val quantity: Double, val unit: String,
     val notes: String, val receipt: String, val date: String, val image: String, val brand: String, val company: String,
     val materialType: String = MaterialTypes.CONSTRUCTION, val control: StockControl = StockControl.QUANTITY,
-    val identifier: String = "", val unitDetails: List<StockUnitEntry> = emptyList(), val rental: RentalEntry? = null)
+    val identifier: String = "", val unitDetails: List<StockUnitEntry> = emptyList(), val rental: RentalEntry? = null,
+    val stockThreshold: Double? = null)

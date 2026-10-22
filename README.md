@@ -2,6 +2,12 @@
 
 Aplicación Android para registrar materiales de construcción vial y herramientas.
 
+Versión 1.0.7: unidades en singular cuando la cantidad es 1, filtro de préstamos pendientes de hoy independiente por stock y compartido entre vistas sencilla y completa, e ícono con fondo violeta en Android 6 y posteriores. Rama de publicación: `codex/version-1.0.7`.
+
+- Ajustes → Acerca de la aplicación contiene la guía completa de uso, organizada en apartados con viñetas que se expanden al tocarlos. La referencia de colores de Control mensual de Guantes moteados está en esa guía.
+- Los errores de formularios, operaciones, fotos y almacenamiento aparecen durante 2 segundos en un aviso flotante centrado en la zona baja, separado del borde inferior. Repetir el mismo intento vuelve a mostrar el error.
+- Los cestos de movimientos están habilitados también para eventos de daño, reparación y alquiler. La eliminación se guarda transaccionalmente y recalcula existencias, estados y préstamos. Los préstamos conectados por conjuntos se eliminan juntos. Las operaciones posteriores incompatibles se deben corregir primero; si una eliminación dejaría stock negativo, se revierte toda la transacción. Registro de compras incluye cestos en ambas vistas para eliminar la compra y su ingreso asociado.
+
 - Solapas Materiales y Herramientas, búsqueda y vistas sencilla/completa.
 - Todos los buscadores muestran una «×» a la derecha cuando contienen texto; permite borrar de una vez la búsqueda sin modificar otros filtros.
 - El menú depende de la solapa activa. Materiales: Movimientos de materiales, Registro de compras materiales, Materiales dañados, Papelera de materiales, Ajustes y Acerca del almacenamiento. Herramientas: Movimiento de herramientas, Registro de compras herramientas, Estado y reparación de herramientas, Unir / desunir herramientas, Herramientas alquiladas, Papelera de herramientas, Ajustes y Acerca del almacenamiento. «Ajustes» reúne Personal de obra, Cambiar nombre del stock, Obras, Unidades, Marcas y Empresas.
@@ -72,3 +78,8 @@ La interfaz StockRepository separa la pantalla del almacenamiento. StockItem rep
 Compilar: gradlew.bat :app:assembleDebug
 Pruebas locales: gradlew.bat :app:testDebugUnitTest
 Pruebas en dispositivo/emulador (persistencia, migración desde versiones 1/2/3, claves foráneas, compras, egresos, devoluciones individuales, identificación, eliminación, personal y formularios): gradlew.bat :app:connectedDebugAndroidTest
+
+
+## Copias en el celular
+
+En Ajustes → Almacenamiento se puede elegir una carpeta compartida, guardar la base y las fotos en un ZIP con fecha, buscar copias y restaurarlas previa revisión y confirmación. Los archivos guardados fuera del directorio privado sobreviven a la desinstalación. Después de reinstalar o borrar datos, la app ofrece recuperar una copia; hay que volver a autorizar la carpeta o seleccionar el ZIP. Las copias son manuales. Una copia incompatible o dañada se rechaza sin reemplazar el inventario. El contrato para futuras versiones está en BACKUP_FORMAT.md.

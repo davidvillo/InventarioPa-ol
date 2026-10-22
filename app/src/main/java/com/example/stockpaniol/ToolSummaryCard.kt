@@ -12,6 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
@@ -34,24 +36,31 @@ internal fun stockCardTitleHeight(items: List<StockItem>, cardWidth: Dp): Dp {
 
 @Composable
 internal fun StockSummaryCard(item: StockItem, onPhoto: () -> Unit, onEdit: () -> Unit, tools: Boolean = true,
-    onUnitClick: ((InventoryUnit) -> Unit)? = null, titleMinHeight: Dp = 0.dp) {
+    onUnitClick: ((InventoryUnit) -> Unit)? = null, titleMinHeight: Dp = 0.dp, bundleLines: List<String> = emptyList(),
+    stockAlertsEnabled: Boolean = false) {
     var expanded by rememberSaveable(item.id, tools) { mutableStateOf(false) }
     val tag = if (tools) "tool" else "material"
+    val alert = if (stockAlertsEnabled) stockAlert(item, tools) else null
     val brands = if (item.individuallyTracked) item.units.filter { it.inActiveStock }.map { it.brand }.filter { it.isNotBlank() }.distinct().joinToString(", ") else item.brand
     val bodyHeight = with(LocalDensity.current) { MaterialTheme.typography.bodySmall.lineHeight.toDp() * 4 } + 80.dp
     Card(modifier = Modifier.fillMaxWidth().testTag("$tag-card-${item.id}").clickable(onClick = onEdit),
         colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(10.dp)) {
-        Text(item.name, modifier = Modifier.fillMaxWidth().background(cardTitleColor(Color.White))
+        Text(item.name, color = Color.Black, modifier = Modifier.fillMaxWidth().background(alert?.color ?: cardTitleColor(Color.White))
+            .semantics { if (alert != null) stateDescription = alert.label }
             .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 8.dp)
             .heightIn(min = titleMinHeight).testTag("$tag-title-${item.id}")
             .clickable(onClickLabel = if (tools) "Abrir herramienta" else "Abrir material", onClick = onEdit),
             style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Row(Modifier.fillMaxWidth().height(bodyHeight).padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.Top) {
+        Row(Modifier.fillMaxWidth().then(if (bundleLines.isEmpty()) Modifier.height(bodyHeight) else Modifier.heightIn(min = bodyHeight)).padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.Top) {
             StockPhoto(item.images.firstOrNull().orEmpty(), Modifier.size(72.dp).testTag("$tag-photo-${item.id}")
                 .clickable(onClickLabel = "Ampliar imagen", onClick = onPhoto))
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp).fillMaxHeight(), verticalArrangement = Arrangement.Top) {
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp).then(if (bundleLines.isEmpty()) Modifier.fillMaxHeight() else Modifier), verticalArrangement = Arrangement.Top) {
                 Text("Marca: ${brands.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text("Observaciones: ${item.notes.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("Observaciones: ${item.notes.ifBlank { "—" }}", modifier = Modifier.testTag("$tag-notes-${item.id}"), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                bundleLines.forEachIndexed { index, line ->
+                    Text(line, modifier = Modifier.testTag("$tag-bundle-${item.id}-$index"), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary)
+                }
                 if (item.individuallyTracked) TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("$tag-detail-${item.id}"),
                     contentPadding = PaddingValues(0.dp)) {
                     Text(if (expanded) "Ocultar detalle ▴" else "Ver ${item.units.size} ${if (item.units.size == 1) "unidad" else "unidades"} ▾",
@@ -61,7 +70,7 @@ internal fun StockSummaryCard(item: StockItem, onPhoto: () -> Unit, onEdit: () -
             }
             Column(Modifier.widthIn(min = 40.dp, max = 88.dp).testTag("$tag-quantity-${item.id}"), horizontalAlignment = Alignment.End) {
                 Text(formatStockQuantity(item.quantity), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                Text(item.unit, color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                Text(stockUnitLabel(item.unit, item.quantity), color = Color.Gray, style = MaterialTheme.typography.bodySmall)
             }
         }
         if (expanded) {

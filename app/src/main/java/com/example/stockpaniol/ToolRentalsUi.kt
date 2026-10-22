@@ -23,7 +23,7 @@ fun ToolRentalsDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
     var query by rememberSaveable { mutableStateOf("") }
     var selected by remember { mutableStateOf<InventoryUnit?>(null) }
     var historyCode by rememberSaveable { mutableStateOf<String?>(null) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     var loaded by remember { mutableStateOf(false) }
     LaunchedEffect(revision) {
         runCatching { withContext(Dispatchers.IO) { repository.items(true) } }
@@ -39,7 +39,7 @@ fun ToolRentalsDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
             FilterChip(closed, { closed = true }, label = { Text("Devueltos al proveedor") })
         }
         OutlinedTextField(query, { query = it }, label = { Text("Buscar herramienta, proveedor o contrato") }, trailingIcon = { ClearSearchButton(query) { query = "" } }, modifier = Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         if (!loaded) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
             items(rows, key = { it.second.id }) { (name, unit) ->
@@ -83,7 +83,7 @@ private fun ReturnRentalDialog(repository: StockRepository, unit: InventoryUnit,
     var date by rememberSaveable(unit.id) { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable(unit.id) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     StockOverlay({ if (!busy) onDismiss() }) {
         Text("Devolver al proveedor", style = MaterialTheme.typography.titleLarge)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -94,7 +94,7 @@ private fun ReturnRentalDialog(repository: StockRepository, unit: InventoryUnit,
                 label = { Text(if (unit.condition == ToolCondition.OPERATIVE) "Observaciones de entrega" else "Estado de entrega / observaciones *") },
                 minLines = 3, modifier = Modifier.fillMaxWidth())
             Text("Cierra el alquiler de esta unidad y la retira del stock disponible. Su historial se conserva en Movimientos de herramientas.", style = MaterialTheme.typography.bodySmall)
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancelar") }

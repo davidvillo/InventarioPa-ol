@@ -67,7 +67,7 @@ class StockCatalogueRepositoryTest {
         r.writableDatabase.version = 9
         r.close()
         LocalStockRepository(context).use { reopened ->
-            assertEquals(13, reopened.readableDatabase.version)
+            assertEquals(14, reopened.readableDatabase.version)
             assertEquals(tools, reopened.items(true))
             assertEquals(materials, reopened.items(false))
             assertEquals(setOf("Bosch", "Makita", "Acme"), reopened.stockOptions(brand).map { it.name }.toSet())

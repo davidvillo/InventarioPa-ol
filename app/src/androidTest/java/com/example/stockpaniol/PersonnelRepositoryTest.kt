@@ -112,7 +112,7 @@ class PersonnelRepositoryTest {
         db.version = 4
         r.close()
         LocalStockRepository(context).use { migrated ->
-            assertEquals(13, migrated.readableDatabase.version)
+            assertEquals(14, migrated.readableDatabase.version)
             assertEquals(original.id, migrated.personnel().single().id)
             assertEquals("Obra anterior", migrated.personnel().single().assignment.name)
             assertTrue(migrated.worksites().map { it.name }.containsAll(Worksite.defaults + "Obra anterior"))

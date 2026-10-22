@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun StockPhotoGallery(name: String, images: List<String>, busy: Boolean,
     onSave: (List<String>) -> Unit, onError: (String) -> Unit, onDismiss: () -> Unit) {

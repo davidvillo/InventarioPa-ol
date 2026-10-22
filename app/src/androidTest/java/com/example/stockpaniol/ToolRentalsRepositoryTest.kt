@@ -86,7 +86,6 @@ class ToolRentalsRepositoryTest {
         rejects { r.issue(true, item.id, 1.0, date, person, "", listOf(unit.id)) }
         rejects { r.changeToolState(unit.id, ToolAction.RESTORE, date, "Recuperar") }
         rejects { r.deleteMovement(true, before.first { it.kind == ToolRentals.INCOME }.id) }
-        rejects { r.deleteMovement(true, before.first { it.kind == ToolRentals.RETURN }.id) }
         assertEquals(before, r.movements(true))
         assertTrue(r.purchases(true).isEmpty())
     }
@@ -117,7 +116,7 @@ class ToolRentalsRepositoryTest {
         r.writableDatabase.version = 7
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(13, upgraded.readableDatabase.version)
+            assertEquals(14, upgraded.readableDatabase.version)
             assertEquals(before, upgraded.items(true).single())
             assertEquals(history, upgraded.movements(true))
             upgraded.receive(true, entry())

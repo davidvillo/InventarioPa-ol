@@ -20,7 +20,7 @@ internal fun MaterialUnitDialog(repository: StockRepository, item: StockItem, on
     var measures by remember { mutableStateOf(emptyList<MeasurementUnit>()) }
     var selected by rememberSaveable(item.id) { mutableStateOf<Long?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     val scope = rememberCoroutineScope()
     LaunchedEffect(item.id) {
         runCatching { withContext(Dispatchers.IO) { repository.measurements(true).filter { it.identifiesMaterial } } }
@@ -30,10 +30,10 @@ internal fun MaterialUnitDialog(repository: StockRepository, item: StockItem, on
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Cambiar unidad del material") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(item.name)
-            Text("Actual: ${formatStockQuantity(item.quantity)} ${item.unit}")
+            Text("Actual: ${formatStockAmount(item.quantity, item.unit)}")
             StockChoice("Unidad", measures.firstOrNull { it.id == selected }?.name.orEmpty(), measures.map { it.id.toString() to it.name }, !busy) { selected = it.toLong() }
-            Text("La cantidad se mantiene: ${formatStockQuantity(item.quantity)} ${measures.firstOrNull { it.id == selected }?.name ?: item.unit}. Cada identificador representará una unidad o un par completo. Los préstamos y el historial se conservan.", style = MaterialTheme.typography.bodySmall)
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+            Text("La cantidad se mantiene: ${formatStockAmount(item.quantity, measures.firstOrNull { it.id == selected }?.name ?: item.unit)}. Cada identificador representará una unidad o un par completo. Los préstamos y el historial se conservan.", style = MaterialTheme.typography.bodySmall)
+
         }
     }, confirmButton = { TextButton(enabled = !busy && selected != null, onClick = {
         busy = true
@@ -52,7 +52,7 @@ fun MaterialCareDialog(repository: StockRepository, trash: Boolean, onDismiss: (
     var damages by remember { mutableStateOf(emptyList<DamagedMaterial>()) }
     var revision by remember { mutableIntStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     var loaded by remember { mutableStateOf(false) }
     var register by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<DamagedMaterial?>(null) }
@@ -72,14 +72,14 @@ fun MaterialCareDialog(repository: StockRepository, trash: Boolean, onDismiss: (
             else "Para materiales reutilizables o no. Registrá el daño y elegí si se pueden utilizar dañados o deben ir a la papelera.", style = MaterialTheme.typography.bodySmall)
         if (!trash) Button(enabled = loaded, onClick = { register = true }) { Text("Registrar daño") }
         OutlinedTextField(query, { query = it }, label = { Text("Buscar material o identificación") }, trailingIcon = { ClearSearchButton(query) { query = "" } }, modifier = Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         if (!loaded) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(rows, key = { it.second.id }) { (item, damage) ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(item.name, style = MaterialTheme.typography.titleMedium)
-                        Text("${formatStockQuantity(damage.quantity)} ${item.unit}")
+                        Text("${formatStockAmount(damage.quantity, item.unit)}")
                         item.units.firstOrNull { it.id == damage.unitId }?.let { Text(it.label) }
                         Text("Daño: ${damage.notes}")
                         Text(displayStockDate(damage.date))
@@ -107,7 +107,7 @@ internal fun MaterialDamageForm(repository: StockRepository, records: List<Stock
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
     var notes by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     val scope = rememberCoroutineScope()
     val item = records.firstOrNull { it.id == itemId }
     StockOverlay({ if (!busy) onDismiss() }) {
@@ -118,25 +118,25 @@ internal fun MaterialDamageForm(repository: StockRepository, records: List<Stock
                     itemId = it.toLong(); ids = emptyList(); quantity = ""
                 }
                 item?.let { current ->
-                    Text("Disponible: ${formatStockQuantity(current.quantity)} ${current.unit}")
+                    Text("Disponible: ${formatStockAmount(current.quantity, current.unit)}")
                     if (current.individuallyTracked) current.availableUnits.forEach { unit ->
                         Row {
                             Checkbox(unit.id in ids, { checked -> if (!busy) ids = if (checked) ids + unit.id else ids - unit.id }, enabled = !busy,
                                 modifier = Modifier.testTag("material-damage-unit-${unit.id}"))
                             Text(unit.label)
                         }
-                    } else OutlinedTextField(quantity, { quantity = it }, enabled = !busy, label = { Text("Cantidad dañada (${current.unit})") }, modifier = Modifier.fillMaxWidth())
+                    } else OutlinedTextField(quantity, { quantity = it }, enabled = !busy, label = { Text("Cantidad dañada (${stockUnitLabel(current.unit, quantity.trim().replace(',', '.').toDoubleOrNull() ?: 0.0)})") }, modifier = Modifier.fillMaxWidth())
                 }
                 Text("La cantidad dañada queda apartada hasta que decidas utilizarla o enviarla a la papelera.")
             } else {
                 Text(item?.name.orEmpty())
-                Text("${formatStockQuantity(damage!!.quantity)} ${item?.unit.orEmpty()}")
+                Text(formatStockAmount(damage!!.quantity, item?.unit.orEmpty()))
                 Text("Daño: ${damage.notes}")
                 if (action == MaterialDamageAction.USE) Text("Se habilitará esta cantidad para egresos, conservando el registro del daño.")
             }
             StockDateField("Fecha del cambio", date, !busy) { date = it }
             OutlinedTextField(notes, { notes = it }, enabled = !busy, label = { Text(if (action == MaterialDamageAction.DAMAGE) "Qué le pasó *" else "Motivo *") }, minLines = 3, modifier = Modifier.fillMaxWidth())
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancelar") }

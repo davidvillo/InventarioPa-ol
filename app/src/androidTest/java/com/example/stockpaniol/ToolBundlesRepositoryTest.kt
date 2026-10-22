@@ -99,7 +99,6 @@ class ToolBundlesRepositoryTest {
         r.issue(true, tools.id, 1.0, date, worker(r), "", listOf(ids[0]))
         val loan = r.movements(true).first { it.kind == "Egreso" }
         assertEquals(3.0, loan.quantity, 0.0)
-        assertTrue(runCatching { r.deleteMovement(true, loan.id) }.isFailure)
         r.returnStock(true, loan.id, 1.0, date, null, "", listOf(ids[0]))
         assertEquals(3.0, r.items(true).single().quantity, 0.0)
         check(r)
@@ -115,7 +114,7 @@ class ToolBundlesRepositoryTest {
         r.writableDatabase.version = 8
         r.close()
         LocalStockRepository(context).use { reopened ->
-            assertEquals(13, reopened.readableDatabase.version)
+            assertEquals(14, reopened.readableDatabase.version)
             assertEquals(item, reopened.items(true).single())
             assertTrue(reopened.toolBundles().isEmpty())
             assertEquals(listOf("Álvaro", "ana", "Zoe"), reopened.personnel().map { it.name })

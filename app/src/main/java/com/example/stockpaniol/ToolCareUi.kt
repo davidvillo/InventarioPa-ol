@@ -24,7 +24,7 @@ fun ToolCareDialog(repository: StockRepository, trash: Boolean, onDismiss: () ->
     var query by rememberSaveable { mutableStateOf("") }
     var selectedUnit by remember { mutableStateOf<InventoryUnit?>(null) }
     var selectedAction by remember { mutableStateOf<ToolAction?>(null) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     var loaded by remember { mutableStateOf(false) }
     LaunchedEffect(revision) {
         runCatching { withContext(Dispatchers.IO) { repository.items(true) } }
@@ -42,7 +42,7 @@ fun ToolCareDialog(repository: StockRepository, trash: Boolean, onDismiss: () ->
         Text(if (trash) "Las bajas conservan su historial. Restaurar las devuelve a dañadas, sin sumarlas al stock disponible."
             else "Las herramientas dañadas o en reparación no están disponibles para entregar.", style = MaterialTheme.typography.bodySmall)
         if (initialUnitId == null) OutlinedTextField(query, { query = it }, label = { Text("Buscar herramienta, código o taller") }, trailingIcon = { ClearSearchButton(query) { query = "" } }, modifier = Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         if (!loaded) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
             items(rows, key = { it.second.id }) { (name, unit) ->
@@ -79,7 +79,7 @@ private fun ToolActionDialog(repository: StockRepository, unit: InventoryUnit, a
     var notes by rememberSaveable(unit.id, action) { mutableStateOf("") }
     var workshop by rememberSaveable(unit.id, action) { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     StockOverlay({ if (!busy) onDismiss() }) {
         Text(action.label, style = MaterialTheme.typography.titleLarge)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -95,7 +95,7 @@ private fun ToolActionDialog(repository: StockRepository, unit: InventoryUnit, a
             }
             OutlinedTextField(notes, { notes = it }, enabled = !busy, label = { Text(label) }, minLines = 3, modifier = Modifier.fillMaxWidth())
             Text("Este cambio quedará registrado en Movimientos de herramientas.", style = MaterialTheme.typography.bodySmall)
-            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancelar") }

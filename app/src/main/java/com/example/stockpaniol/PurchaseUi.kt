@@ -13,17 +13,21 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss: () -> Unit) {
+fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss: () -> Unit, onChanged: () -> Unit = {}) {
     var rows by remember { mutableStateOf(emptyList<StockPurchase>()) }
     var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
+    var tableZoom by rememberSaveable { mutableFloatStateOf(DEFAULT_COMPLETE_TABLE_ZOOM) }
     var complete by rememberSaveable { mutableStateOf(true) }
     var filters by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -32,7 +36,11 @@ fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
     var until by rememberSaveable { mutableStateOf("") }
     var sortColumn by rememberSaveable { mutableStateOf(PurchaseColumn.DATE) }
     var descending by rememberSaveable { mutableStateOf(true) }
-    LaunchedEffect(tools) {
+    var revision by remember { mutableIntStateOf(0) }
+    var deleteId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(tools, revision) {
         runCatching { withContext(Dispatchers.IO) { repository.purchases(tools) } }
             .onSuccess { rows = it }.onFailure { error = "No se pudieron cargar las compras." }
         loading = false
@@ -45,7 +53,7 @@ fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                 else PurchaseColumn.valueOf(searchColumn).let { it.display(p).contains(query, true) || it.text(p).contains(query, true) })
         }, sortColumn, descending)
     }
-    StockOverlay(onDismiss) {
+    StockOverlay({ if (!busy) onDismiss() }) {
         Text("Registro de compras ${if (tools) "herramientas" else "materiales"}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = { complete = !complete }) { Text(if (complete) "Vista completa" else "Vista sencilla") }
@@ -73,26 +81,35 @@ fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
         }
         Text("${filtered.size} compras", style = MaterialTheme.typography.labelMedium)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-        if (from.isNotBlank() && until.isNotBlank() && from > until) Text("La fecha desde debe ser anterior o igual a hasta.", color = MaterialTheme.colorScheme.error)
+
+        StockErrorEffect(if (from.isNotBlank() && until.isNotBlank() && from > until) "La fecha desde debe ser anterior o igual a hasta." else "")
         if (complete) {
-            Column(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-                Row(Modifier.background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp)) {
-                    columns.forEach { column ->
-                        Text(column.label(tools) + if (column == sortColumn) { if (descending) " ↓" else " ↑" } else " ↕",
-                            Modifier.width(column.width.dp).clickable {
-                                descending = column == sortColumn && !descending; sortColumn = column
-                            }.padding(vertical = 12.dp), color = Color.White, fontWeight = FontWeight.Bold)
+            ZoomableTable(tableZoom, { tableZoom = it }, Modifier.weight(1f).fillMaxWidth()) {
+                CompleteTable(columns.map { it.width } + 72, header = { widths ->
+                    CompleteTableRow(Modifier.background(MaterialTheme.colorScheme.primary)) {
+                        columns.forEachIndexed { index, column ->
+                            CompleteTableText(column.label(tools) + if (column == sortColumn) { if (descending) " ↓" else " ↑" } else " ↕",
+                                widths[index], header = true, onClick = {
+                                    descending = column == sortColumn && !descending; sortColumn = column
+                                })
+                        }
+                        CompleteTableText("Eliminar", widths.last(), header = true)
                     }
-                }
-                LazyColumn {
+                }) { widths ->
                     items(filtered, key = { it.id }) { purchase ->
-                        Row(Modifier.padding(horizontal = 8.dp)) {
-                            columns.forEach { column -> Text(column.display(purchase), Modifier.width(column.width.dp).padding(vertical = 12.dp)) }
+                        CompleteTableRow {
+                            columns.forEachIndexed { index, column -> CompleteTableText(column.display(purchase), widths[index]) }
+                            CompleteTableCell(widths.last()) {
+                                IconButton(enabled = !busy, onClick = { deleteId = purchase.id }, modifier = Modifier.testTag("delete-purchase-${purchase.id}")) {
+                                    Icon(painterResource(R.drawable.ic_delete_image), "Eliminar ingreso ${purchase.id}", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
                         }
                         HorizontalDivider()
                     }
-                    if (filtered.isEmpty() && !loading) item { Text("No hay compras con estos filtros.", Modifier.padding(16.dp)) }
+                    if (filtered.isEmpty() && !loading) item {
+                        CompleteTableRow { CompleteTableText("No hay compras con estos filtros.", widths.reduce { a, b -> a + b }) }
+                    }
                 }
             }
         } else {
@@ -100,10 +117,15 @@ fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                 items(filtered, key = { it.id }) { purchase ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(purchase.itemName, fontWeight = FontWeight.Bold)
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(purchase.itemName, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                                IconButton(enabled = !busy, onClick = { deleteId = purchase.id }, modifier = Modifier.testTag("delete-purchase-${purchase.id}")) {
+                                    Icon(painterResource(R.drawable.ic_delete_image), "Eliminar ingreso ${purchase.id}", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
                             if (purchase.identitySummary.isNotBlank()) Text(purchase.identitySummary)
                             Text("Fecha: ${displayStockDate(purchase.date)}")
-                            Text("${formatStockQuantity(purchase.quantity)} ${purchase.unit}")
+                            Text("${formatStockAmount(purchase.quantity, purchase.unit)}")
                             Text("Empresa: ${purchase.company.ifBlank { "—" }}")
                             Text("Remito: ${purchase.receipt.ifBlank { "—" }}")
                         }
@@ -112,6 +134,21 @@ fun PurchaseHistoryDialog(tools: Boolean, repository: StockRepository, onDismiss
                 if (filtered.isEmpty() && !loading) item { Text("No hay compras con estos filtros.", Modifier.padding(16.dp)) }
             }
         }
-        TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Cerrar") }
+        TextButton(enabled = !busy, onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Cerrar") }
+    }
+    rows.firstOrNull { it.id == deleteId }?.let { purchase ->
+        AlertDialog(onDismissRequest = { if (!busy) deleteId = null }, title = { Text("Eliminar ingreso") }, text = {
+            Text("${purchase.itemName} · ${formatStockAmount(purchase.quantity, purchase.unit)}\nSe eliminarán la compra y su movimiento de ingreso de la base de datos y se ajustará el stock. Si sus unidades tienen movimientos posteriores, deberás eliminarlos primero.")
+        }, confirmButton = { TextButton(enabled = !busy, onClick = {
+            busy = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { runCatching {
+                    repository.deleteMovement(tools, purchase.movementId ?: error("El ingreso no tiene un movimiento asociado."))
+                } }
+                busy = false; deleteId = null
+                result.onSuccess { error = ""; revision++; onChanged() }
+                    .onFailure { error = it.message ?: "No se pudo eliminar el ingreso." }
+            }
+        }) { Text(if (busy) "Eliminando…" else "Eliminar") } }, dismissButton = { TextButton(enabled = !busy, onClick = { deleteId = null }) { Text("Cancelar") } })
     }
 }

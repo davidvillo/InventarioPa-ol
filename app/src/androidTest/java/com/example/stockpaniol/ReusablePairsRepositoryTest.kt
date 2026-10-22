@@ -48,7 +48,7 @@ class ReusablePairsRepositoryTest {
         r.writableDatabase.version = 11
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(13, upgraded.readableDatabase.version)
+            assertEquals(14, upgraded.readableDatabase.version)
             val pairs = upgraded.measurements().first { it.pairs }
             upgraded.updateMaterialUnit(item.id, pairs.id)
             assertEquals(before.copy(unit = "pares"), upgraded.items(false).single())

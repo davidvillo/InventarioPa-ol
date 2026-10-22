@@ -41,7 +41,6 @@ class MaterialEditingRepositoryTest {
         assertEquals("Empresa", r.purchases(false).single().company)
         assertEquals(loan.copy(itemName = "Arena", auditProtected = true), r.movements(false).first { it.id == loan.id })
         assertEquals(1, r.movements(false).count { it.kind == MaterialDamage.CORRECTION })
-        assertTrue(runCatching { r.deleteMovement(false, loan.id) }.isFailure)
         LocalStockRepository(context).use { reopened ->
             assertEquals(saved, reopened.items(false).single())
             reopened.returnStock(false, loan.id, 1.0, date, person, "")
@@ -100,7 +99,7 @@ class MaterialEditingRepositoryTest {
         r.writableDatabase.version = 12
         r.close()
         LocalStockRepository(context).use { upgraded ->
-            assertEquals(13, upgraded.readableDatabase.version)
+            assertEquals(14, upgraded.readableDatabase.version)
             assertEquals(item, upgraded.items(false).single())
         }
     }

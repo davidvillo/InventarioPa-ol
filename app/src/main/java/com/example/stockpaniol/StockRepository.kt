@@ -15,7 +15,7 @@ interface StockRepository : PersonnelRepository, MeasurementRepository, StockCat
     fun deleteMaterial(itemId: Long)
     fun updateMaterialUnit(itemId: Long, measurementId: Long)
     fun toolBundles(): List<ToolBundle>
-    fun saveToolBundle(id: Long?, name: String, unitIds: List<Long>)
+    fun saveToolBundle(id: Long?, name: String, unitIds: List<Long>, principalUnitId: Long? = null)
     fun dissolveToolBundle(id: Long)
     fun toolLoanUnits(movementId: Long): List<ToolLoanUnit>
     fun updateImage(tools: Boolean, itemId: Long, image: String)
@@ -31,9 +31,12 @@ interface StockRepository : PersonnelRepository, MeasurementRepository, StockCat
     fun identifyUnit(tools: Boolean, unitId: Long, brand: String, identifier: String)
     fun deleteMovement(tools: Boolean, movementId: Long)
     var stockName: String
+    var stockAlertsEnabled: Boolean
 }
 
-class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_paniol.db", null, 13), StockRepository {
+class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_paniol.db", null, DATABASE_VERSION,
+    android.database.DatabaseErrorHandler { throw android.database.sqlite.SQLiteException("La base necesita revisión. Se conservó el archivo; podés recuperar una copia desde Almacenamiento.") }), StockRepository {
+    companion object { const val DATABASE_VERSION = 14 }
     private val catalogue = LocalStockCatalogueRepository { writableDatabase }
     override fun stockOptions(kind: StockCatalogueKind, includeInactive: Boolean) = catalogue.stockOptions(kind, includeInactive)
     override fun addStockOption(kind: StockCatalogueKind, name: String) = catalogue.addStockOption(kind, name)
@@ -73,6 +76,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         LocalStockCatalogueRepository.migrate(db)
         MaterialDamage.migrate(db)
         MaterialCorrections.migrate(db)
+        ToolBundles.migratePrincipal(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
@@ -98,6 +102,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         if (oldVersion < 11) MaterialDamage.migrate(db)
         if (oldVersion < 12) LocalMeasurementRepository.migratePairCounting(db)
         if (oldVersion < 13) MaterialCorrections.migrate(db)
+        if (oldVersion < 14) ToolBundles.migratePrincipal(db)
     }
     private fun unitTable(tools: Boolean) = "unidades_${table(tools)}"
     private fun unitMovementTable(tools: Boolean) = "unidades_movimientos_${table(tools)}"
@@ -295,10 +300,22 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
     override var stockName: String
         get() = readableDatabase.rawQuery("SELECT valor FROM configuracion WHERE clave='nombre'", null).use { it.moveToFirst(); it.getString(0) }
         set(value) { require(value.trim().isNotEmpty()); writableDatabase.execSQL("UPDATE configuracion SET valor=? WHERE clave='nombre'", arrayOf(value.trim())) }
+    override var stockAlertsEnabled: Boolean
+        get() = readableDatabase.rawQuery("SELECT valor FROM configuracion WHERE clave='aviso_stock'", null).use { it.moveToFirst() && it.getString(0) == "1" }
+        set(value) { writableDatabase.execSQL("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES ('aviso_stock', ?)", arrayOf(if (value) "1" else "0")) }
+
+    private fun saveStockThreshold(db: SQLiteDatabase, itemId: Long, value: Double) {
+        validateStockThreshold(value)
+        db.execSQL("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", arrayOf("umbral_material_$itemId", value.toString()))
+    }
+
     override fun items(tools: Boolean): List<StockItem> {
         val units = inventoryUnits(tools).groupBy { it.itemId }
+        val thresholds = if (tools) emptyMap() else readableDatabase.rawQuery("SELECT clave, valor FROM configuracion WHERE clave LIKE 'umbral_material_%'", null).use { c ->
+            buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1).toDoubleOrNull() ?: 5.0) }
+        }
         return readableDatabase.rawQuery("SELECT a.*, u.entera FROM ${table(tools)} a JOIN unidades_medida u ON u.id=a.unidad_medida_id ORDER BY a.nombre COLLATE NOCASE", null).use { cursor ->
-            buildList { while (cursor.moveToNext()) add(StockItem(cursor.getLong(0), cursor.getString(1), cursor.getDouble(2), cursor.getString(3), cursor.getString(4), cursor.getString(5), cursor.getString(6), cursor.getString(7), cursor.getString(8), StockControl.valueOf(cursor.getString(9)), units[cursor.getLong(0)].orEmpty(), cursor.getInt(11) == 1)) }
+            buildList { while (cursor.moveToNext()) add(StockItem(cursor.getLong(0), cursor.getString(1), cursor.getDouble(2), cursor.getString(3), cursor.getString(4), cursor.getString(5), cursor.getString(6), cursor.getString(7), cursor.getString(8), StockControl.valueOf(cursor.getString(9)), units[cursor.getLong(0)].orEmpty(), cursor.getInt(11) == 1, thresholds["umbral_material_${cursor.getLong(0)}"] ?: 5.0)) }
         }
     }
     override fun updateImage(tools: Boolean, itemId: Long, image: String) =
@@ -306,7 +323,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
 
     override fun toolBundles() = ToolBundles.all(readableDatabase)
 
-    override fun saveToolBundle(id: Long?, name: String, unitIds: List<Long>) = transaction { db ->
+    override fun saveToolBundle(id: Long?, name: String, unitIds: List<Long>, principalUnitId: Long?) = transaction { db ->
         require(name.isNotBlank()) { "Ingresá un nombre para el conjunto." }
         require(unitIds.size >= 2 && unitIds.distinct().size == unitIds.size) { "Seleccioná al menos dos unidades distintas." }
         val bundles = toolBundles()
@@ -315,7 +332,9 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         val units = inventoryUnits(true, db).associateBy { it.id }
         require((unitIds + previous?.unitIds.orEmpty()).all { units[it]?.available == true }) { "Para unir o separar herramientas, todas deben estar disponibles en el pañol." }
         require(bundles.none { it.id != id && it.unitIds.any { member -> member in unitIds } }) { "Una de las herramientas ya pertenece a otro conjunto. Separala primero." }
-        val values = ContentValues().apply { put("nombre", name.trim()) }
+        require(principalUnitId == null || principalUnitId in unitIds) { "La herramienta principal debe pertenecer al conjunto." }
+        val principal = principalUnitId ?: previous?.principalUnitId?.takeIf { it in unitIds } ?: unitIds.first()
+        val values = ContentValues().apply { put("nombre", name.trim()); put("principal_id", principal) }
         val target = id ?: db.insertOrThrow("conjuntos_herramientas", null, values)
         if (id != null) db.update("conjuntos_herramientas", values, "id=?", arrayOf(id.toString()))
         db.delete("miembros_conjuntos", "conjunto_id=?", arrayOf(target.toString()))
@@ -390,6 +409,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
     }
 
     override fun updateMaterial(itemId: Long, edit: MaterialEdit) = transaction { db ->
+        edit.stockThreshold?.let { saveStockThreshold(db, itemId, it) }
         val item = items(false).firstOrNull { it.id == itemId } ?: error("El material ya no existe.")
         require(edit.name.isNotBlank()) { "Ingresá el nombre del material." }
         require(items(false).none { it.id != itemId && it.name.equals(edit.name.trim(), true) }) { "Ese nombre ya existe." }
@@ -462,6 +482,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         db.delete("movimientos_materiales", "articulo_id=?", args)
         db.delete("compras_materiales", "articulo_id=?", args)
         db.delete("materiales", "id=?", args)
+        db.delete("configuracion", "clave=?", arrayOf("umbral_material_$itemId"))
     }
 
     override fun updateImages(tools: Boolean, itemId: Long, images: List<String>) {
@@ -528,6 +549,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
                 }, "id=?", arrayOf(current.id.toString()))
                 current.id
             }
+            if (!tools) entry.stockThreshold?.let { saveStockThreshold(db, id, it) }
             if (control == StockControl.INDIVIDUAL) reserveIdentifierPrefixes(db, tools)
             if (entry.quantity == 0.0) {
                 db.setTransactionSuccessful()
@@ -583,7 +605,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         return readableDatabase.rawQuery("""SELECT c.id, c.articulo_id, a.nombre,
             c.cantidad, c.unidad, c.fecha, c.empresa, c.remito, m.id FROM ${purchaseTable(tools)} c
             JOIN ${table(tools)} a ON a.id=c.articulo_id LEFT JOIN ${movementTable(tools)} m ON m.compra_id=c.id ORDER BY c.fecha DESC, c.id DESC""", null).use { c ->
-            buildList { while (c.moveToNext()) add(StockPurchase(c.getLong(0), c.getLong(1), c.getString(2), c.getDouble(3), c.getString(4), c.getString(5), c.getString(6), c.getString(7), units[c.getLong(8)].orEmpty().joinToString("; ") { it.unit.label })) }
+            buildList { while (c.moveToNext()) add(StockPurchase(c.getLong(0), c.getLong(1), c.getString(2), c.getDouble(3), c.getString(4), c.getString(5), c.getString(6), c.getString(7), units[c.getLong(8)].orEmpty().joinToString("; ") { it.unit.label }, if (c.isNull(8)) null else c.getLong(8))) }
         }
     }
     private fun transaction(action: (SQLiteDatabase) -> Unit) {
@@ -634,7 +656,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         validateMovementDate(date)
         item.policy.validateSelection(quantity, unitIds)
         require(unitIds.all { id -> item.availableUnits.any { it.id == id } }) { "Alguna unidad no está disponible o pertenece a otro artículo." }
-        require(quantity <= item.quantity) { "La cantidad supera el stock disponible (${formatStockQuantity(item.quantity)} ${item.unit})." }
+        require(quantity <= item.quantity) { "La cantidad supera el stock disponible (${formatStockAmount(item.quantity, item.unit)})." }
         val worker = personnel().firstOrNull { it.id == workerId } ?: error("Seleccioná personal de obra.")
         changeQuantity(db, tools, item, -quantity)
         val movementId = insertMovement(db, tools, item, quantity, date, worker, "Egreso", notes)
@@ -669,7 +691,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         validateMovementQuantity(quantity, movement.unit, movement.wholeNumbers)
         validateMovementDate(date)
         require(date >= movement.date && (movement.returnDate.isBlank() || date >= movement.returnDate)) { "La devolución no puede ser anterior al egreso ni a la última devolución." }
-        require(quantity <= movement.pending) { "La cantidad supera lo pendiente de devolución (${formatStockQuantity(movement.pending)} ${movement.unit})." }
+        require(quantity <= movement.pending) { "La cantidad supera lo pendiente de devolución (${formatStockAmount(movement.pending, movement.unit)})." }
         val worker = if (tools) null else (personnel(true).firstOrNull { it.id == workerId && (it.active || it.id == movement.workerId) } ?: error("Seleccioná la persona que devuelve el material."))
         val item = items(tools).first { it.id == movement.itemId }
         item.policy.validateSelection(quantity, unitIds)
@@ -736,7 +758,7 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
             if (action == MaterialDamageAction.USE) changeQuantity(db, false, item, damage.quantity)
             db.execSQL("UPDATE danos_materiales SET estado=?, fecha=? WHERE id=?", arrayOf<Any>(destination, date, damage.id))
             MaterialDamage.record(db, item, damage.quantity, item.units.firstOrNull { it.id == damage.unitId }, action, date,
-                "Daño: ${damage.notes}\n${notes.trim()}")
+                "Daño: ${damage.notes}\n${notes.trim()}", damage.id)
         }
     }
 
@@ -773,41 +795,6 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
             listOf(ToolRentals.description(rental), "Estado de entrega: ${unit.condition.label}", notes).filter { it.isNotBlank() }.joinToString("\n"))
     }
     override fun deleteMovement(tools: Boolean, movementId: Long) = transaction { db ->
-        val movement = movements(tools).firstOrNull { it.id == movementId } ?: error("El movimiento ya no existe.")
-        if (tools) {
-            require(!db.rawQuery("SELECT 1 FROM prestamos_conjuntos WHERE movimiento_id=? LIMIT 1", arrayOf(movementId.toString())).use { it.moveToFirst() }) {
-                "Este préstamo pertenece a un conjunto. Conservá el registro y cargá su devolución."
-            }
-            if (movement.kind == "Ingreso") {
-                val grouped = toolBundles().flatMap { it.unitIds }.toSet()
-                require(movement.units.none { it.unit.id in grouped }) { "Separá primero las herramientas de su conjunto." }
-            }
-        }
-        require(!movement.auditProtected) { "Este movimiento conserva el historial del artículo y no se puede eliminar." }
-        val item = items(tools).first { it.id == movement.itemId }
-        if (item.individuallyTracked && movement.kind == "Ingreso") {
-            require(movement.units.size.toDouble() == movement.quantity) { "Este ingreso histórico no identifica sus unidades y debe conservarse." }
-            val ids = movement.units.map { it.unit.id }
-            require(movements(tools).none { it.id != movement.id && it.units.any { u -> u.unit.id in ids } }) { "No se puede eliminar el ingreso: sus unidades tienen movimientos posteriores." }
-            db.delete(unitMovementTable(tools), "movimiento_id=?", arrayOf(movement.id.toString()))
-            ids.forEach { db.delete(unitTable(tools), "id=?", arrayOf(it.toString())) }
-        }
-        val delta = if (movement.kind == "Egreso") movement.pending else -movement.quantity
-        changeQuantity(db, tools, item, delta)
-        if (movement.kind == "Devolución") {
-            val parent = movements(tools).first { it.id == movement.parentId }
-            if (item.individuallyTracked) {
-                val ids = movement.units.map { it.unit.id }
-                require(ids.all { id -> item.availableUnits.any { it.id == id } }) { "No se puede eliminar la devolución: alguna unidad volvió a prestarse." }
-                require(movements(tools).none { it.kind == "Egreso" && it.id > parent.id && it.units.any { u -> u.unit.id in ids } }) { "No se puede eliminar la devolución: alguna unidad tiene préstamos posteriores." }
-                ids.forEach { id -> db.update(unitMovementTable(tools), ContentValues().apply { put("devuelta", 0) }, "movimiento_id=? AND unidad_id=?", arrayOf(parent.id.toString(), id.toString())) }
-            }
-            val latest = db.rawQuery("SELECT MAX(fecha) FROM ${movementTable(tools)} WHERE padre_id=? AND id<>?", arrayOf(parent.id.toString(), movement.id.toString())).use { it.moveToFirst(); if (it.isNull(0)) "" else it.getString(0) }
-            db.update(movementTable(tools), ContentValues().apply { put("devuelto", stockSum(parent.returned, -movement.quantity)); put("fecha_devolucion", latest) }, "id=?", arrayOf(parent.id.toString()))
-        }
-        if (movement.kind == "Egreso") db.delete(movementTable(tools), "padre_id=?", arrayOf(movement.id.toString()))
-        db.delete(movementTable(tools), "id=?", arrayOf(movement.id.toString()))
-        movement.purchaseId?.let { db.delete(purchaseTable(tools), "id=?", arrayOf(it.toString())) }
+        MovementDeletion.delete(this, db, tools, movementId)
     }
 }
-

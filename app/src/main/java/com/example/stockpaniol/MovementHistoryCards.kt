@@ -61,12 +61,12 @@ internal fun MovementHistoryCard(movement: StockMovement, status: MovementStatus
                     Text("Código: ${codes.ifBlank { "—" }}")
                 }
                 Text(movement.kind)
-                Text("Cantidad: ${formatStockQuantity(movement.quantity)} ${movement.unit}")
+                Text("Cantidad: ${formatStockAmount(movement.quantity, movement.unit)}")
                 Text("Personal: ${movement.person.ifBlank { "—" }}")
                 if (!tools) Text("Tipo de material: ${movement.materialType.ifBlank { "—" }}")
-                Text(if (movement.kind == "Egreso") "Pendiente: ${formatStockQuantity(movement.pending)} ${movement.unit}" else "Pendiente: —")
+                Text(if (movement.kind == "Egreso") "Pendiente: ${formatStockAmount(movement.pending, movement.unit)}" else "Pendiente: —")
             }
-            IconButton(enabled = !busy && !movement.auditProtected, onClick = onDelete) {
+            IconButton(enabled = !busy, onClick = onDelete) {
                 Icon(painterResource(R.drawable.ic_delete_image), "Eliminar movimiento ${movement.id}", tint = MaterialTheme.colorScheme.error)
             }
         }

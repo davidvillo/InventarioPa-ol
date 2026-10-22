@@ -11,6 +11,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -24,12 +26,13 @@ fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
     var revision by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
+    var error by rememberStockError()
     var form by rememberSaveable { mutableStateOf(false) }
     var editId by rememberSaveable { mutableStateOf<Long?>(null) }
     var name by rememberSaveable { mutableStateOf("") }
     var search by rememberSaveable { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf(longArrayOf()) }
+    var principal by rememberSaveable { mutableStateOf<Long?>(null) }
     var dissolve by remember { mutableStateOf<ToolBundle?>(null) }
     SideEffect { onBusyChanged(busy) }
     DisposableEffect(Unit) { onDispose { onBusyChanged(false) } }
@@ -42,6 +45,7 @@ fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
     }
     fun open(bundle: ToolBundle?) {
         editId = bundle?.id; name = bundle?.name.orEmpty(); selected = bundle?.unitIds?.toLongArray() ?: longArrayOf()
+        principal = bundle?.principalUnitId ?: selected.firstOrNull()
         search = ""; error = ""; form = true
     }
     val units = stock.flatMap { item -> item.units.map { item.name to it } }
@@ -52,18 +56,28 @@ fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
             OutlinedTextField(name, { name = it }, enabled = !busy, label = { Text("Nombre del conjunto *") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Text("Seleccioná cada unidad que viaja junta. Por ejemplo, martillo y cincel, o una caja con varias herramientas.", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(search, { search = it }, label = { Text("Buscar herramienta, marca o identificador") }, trailingIcon = { ClearSearchButton(search) { search = "" } }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Text("${selected.size} unidades seleccionadas", fontWeight = FontWeight.Bold)
+            Text(if (selected.size == 1) "1 unidad seleccionada" else "${selected.size} unidades seleccionadas", fontWeight = FontWeight.Bold)
+            Text("Elegí la herramienta principal. Las demás unidades seleccionadas serán sus accesorios.", style = MaterialTheme.typography.bodySmall)
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(units.filter { (title, unit) -> unit.inActiveStock && (title.contains(search, true) || unit.label.contains(search, true)) }, key = { it.second.id }) { (title, unit) ->
                     val available = !busy && unit.available && (unit.bundleId == null || unit.bundleId == editId)
                     Row(Modifier.fillMaxWidth().clickable(enabled = available) {
                         selected = if (unit.id in selected) selected.filter { it != unit.id }.toLongArray() else selected + unit.id
+                        if (principal !in selected.toList()) principal = selected.firstOrNull()
                     }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(unit.id in selected, onCheckedChange = null, enabled = available)
                         Column(Modifier.weight(1f)) {
                             Text(title, fontWeight = FontWeight.SemiBold)
                             Text(unit.label, style = MaterialTheme.typography.bodySmall)
+                            if (unit.id in selected) Text(if (unit.id == principal) "Principal del conjunto" else "Accesorio del conjunto", style = MaterialTheme.typography.bodySmall)
                             if (!unit.available) Text(unit.statusLabel, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            RadioButton(selected = unit.id == principal && unit.id in selected,
+                                enabled = available && unit.id in selected, onClick = { principal = unit.id },
+                                modifier = Modifier.semantics { contentDescription = "Principal: $title · ${unit.identifier}" })
+                            if (unit.id in selected && unit.id != principal) TextButton(enabled = available,
+                                onClick = { principal = unit.id }, contentPadding = PaddingValues(horizontal = 4.dp)) { Text("Hacer principal") }
                         }
                     }
                 }
@@ -75,7 +89,9 @@ fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
                             Text(bundle.name, fontWeight = FontWeight.Bold)
-                            units.filter { it.second.id in bundle.unitIds }.forEach { (title, unit) -> Text("$title · ${unit.label}", style = MaterialTheme.typography.bodySmall) }
+                            units.filter { it.second.id in bundle.unitIds }.sortedBy { it.second.id != bundle.principalUnitId }.forEach { (title, unit) ->
+                                Text((if (unit.id == (bundle.principalUnitId ?: bundle.unitIds.firstOrNull())) "Principal: " else "Accesorio: ") + "$title · ${unit.label}", style = MaterialTheme.typography.bodySmall)
+                            }
                             Row {
                                 TextButton(enabled = !busy, onClick = { open(bundle) }) { Text("Modificar herramientas unidas") }
                                 TextButton(enabled = !busy, onClick = { dissolve = bundle }) { Text("Desunir") }
@@ -86,14 +102,14 @@ fun ToolBundlesDialog(repository: StockRepository, onDismiss: () -> Unit, onChan
                 if (bundles.isEmpty() && !loading) item { Text("Todavía no hay herramientas unidas.") }
             }
         }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(enabled = !busy, onClick = { if (form) { form = false; error = "" } else onDismiss() }) { Text(if (form) "Cancelar" else "Cerrar") }
             Button(enabled = !busy && !loading, onClick = {
                 if (!form) open(null) else {
                     busy = true
                     scope.launch {
-                        val result = withContext(Dispatchers.IO) { runCatching { repository.saveToolBundle(editId, name, selected.toList()) } }
+                        val result = withContext(Dispatchers.IO) { runCatching { repository.saveToolBundle(editId, name, selected.toList(), principal) } }
                         busy = false
                         result.onSuccess { form = false; error = ""; revision++; onChanged() }
                             .onFailure { error = it.message ?: "No se pudo guardar el conjunto." }
