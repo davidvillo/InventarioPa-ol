@@ -250,7 +250,7 @@ fun IssueDialog(tools: Boolean, initialId: Long, repository: StockRepository, on
 }
 
 @Composable
-private fun UnitSelection(label: String, selected: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+internal fun UnitSelection(label: String, selected: Boolean, enabled: Boolean, onToggle: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
         Checkbox(selected, { onToggle() }, enabled = enabled)
         Text(label, Modifier.weight(1f))

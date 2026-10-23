@@ -65,6 +65,7 @@ private data class StockListSnapshot(val items: List<StockItem>, val name: Strin
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StockApp(repository: StockRepository) {
+    var personnelIssue by rememberSaveable { mutableStateOf(false) }
     var tools by rememberSaveable { mutableStateOf(false) }
     var complete by rememberSaveable { mutableStateOf(false) }
     var materialZoom by rememberSaveable { mutableFloatStateOf(DEFAULT_COMPLETE_TABLE_ZOOM) }
@@ -164,6 +165,14 @@ fun StockApp(repository: StockRepository) {
     val visibleRecords = remember(activeRecords, movements, today, loanedToday) {
         if (loanedToday) stockLoanedToday(activeRecords, movements, today) else activeRecords
     }
+    fun selectStock(targetTools: Boolean) {
+        if (tools != targetTools) {
+            records = emptyList()
+            tools = targetTools
+            query = ""
+            sortMenu = false
+        }
+    }
     Scaffold(containerColor = Background, topBar = {
         Column {
             TopAppBar(title = { Text(title, modifier = Modifier.clickable { rename = true }, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
@@ -191,15 +200,16 @@ fun StockApp(repository: StockRepository) {
                         style = MaterialTheme.typography.labelMedium, maxLines = 1)
                 }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Blue, titleContentColor = Color.White))
-            TabRow(selectedTabIndex = if (tools) 1 else 0, containerColor = Color.White) {
-                Tab(selected = !tools, onClick = { if (tools) records = emptyList(); tools = false; query = "" }, text = { Text("Materiales") })
-                Tab(selected = tools, onClick = { if (!tools) records = emptyList(); tools = true; query = "" }, text = { Text("Herramientas") })
+            TabRow(selectedTabIndex = if (tools) 1 else 0, containerColor = Color.White,
+                modifier = Modifier.testTag("stock-tabs").stockSectionSwipe(::selectStock)) {
+                Tab(selected = !tools, onClick = { selectStock(false); query = "" }, text = { Text("Materiales") })
+                Tab(selected = tools, onClick = { selectStock(true); query = "" }, text = { Text("Herramientas") })
             }
         }
     }, floatingActionButton = {
         ExtendedFloatingActionButton(onClick = { form = true }, containerColor = Blue, contentColor = Color.White) { Text(if (tools) "+ Agregar herramienta" else "+ Agregar material") }
     }) { inset ->
-        Column(Modifier.padding(inset).fillMaxSize()) {
+        Column(Modifier.padding(inset).fillMaxSize().testTag("stock-viewport").stockSectionSwipe(::selectStock)) {
             BasicTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -225,10 +235,16 @@ fun StockApp(repository: StockRepository) {
                 }
             )
             Text("${visibleRecords.size} ${if (tools) { if (visibleRecords.size == 1) "herramienta" else "herramientas" } else { if (visibleRecords.size == 1) "material" else "materiales" }} · ${if (complete) "Vista completa" else "Vista sencilla"}", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-            FilterChip(selected = loanedToday, onClick = {
-                if (tools) toolLoanedToday = !toolLoanedToday else materialLoanedToday = !materialLoanedToday
-            }, label = { Text(if (tools) "Mostrar prestadas hoy" else "Mostrar prestados hoy") },
-                modifier = Modifier.padding(horizontal = 16.dp).testTag("stock-loaned-today"))
+            FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChip(selected = loanedToday, onClick = {
+                    if (tools) toolLoanedToday = !toolLoanedToday else materialLoanedToday = !materialLoanedToday
+                }, label = { Text(if (tools) "Mostrar prestadas hoy" else "Mostrar prestados hoy") },
+                    modifier = Modifier.testTag("stock-loaned-today"))
+                TextButton(onClick = { personnelIssue = true }, contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier = Modifier.testTag("personnel-issue-open")) {
+                    Text("Prestar por personal", color = Color(0xFF0288D1))
+                }
+            }
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) {
                     TextButton(onClick = { sortMenu = true }) { Text("Ordenar: ${sortColumn.label} ▾") }
@@ -323,6 +339,7 @@ fun StockApp(repository: StockRepository) {
     purchaseTools?.let { stockTools -> key(stockTools) {
         PurchaseHistoryDialog(stockTools, repository, { purchaseTools = null }, { revision++ })
     } }
+    if (personnelIssue) PersonnelIssueDialog(repository, { personnelIssue = false }, { personnelIssue = false; revision++ })
     if (settings) SettingsDialog(repository, { settings = false; revision++ }, onNameChanged = { title = it }, onStockAlertsChanged = { stockAlertsEnabled = it })
     materialCare?.let { trash -> MaterialCareDialog(repository, trash, { materialCare = null }, { revision++ }) }
     toolCare?.let { trash -> ToolCareDialog(repository, trash, { toolCare = null }, { revision++ }) }

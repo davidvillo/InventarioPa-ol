@@ -23,6 +23,7 @@ interface StockRepository : PersonnelRepository, MeasurementRepository, StockCat
     fun movements(tools: Boolean): List<StockMovement>
     fun purchases(tools: Boolean): List<StockPurchase>
     fun issue(tools: Boolean, itemId: Long, quantity: Double, date: String, workerId: Long, notes: String, unitIds: List<Long> = emptyList())
+    fun issueForPersonnel(workerId: Long, date: String, notes: String, lines: List<StockIssueLine>)
     fun returnStock(tools: Boolean, movementId: Long, quantity: Double, date: String, workerId: Long?, notes: String, unitIds: List<Long> = emptyList(), damagedUnits: Map<Long, String> = emptyMap())
     fun damagedMaterials(): List<DamagedMaterial>
     fun changeMaterialState(itemId: Long, action: MaterialDamageAction, quantity: Double, date: String, notes: String, unitIds: List<Long> = emptyList(), damageId: Long? = null)
@@ -631,21 +632,41 @@ class LocalStockRepository(context: Context) : SQLiteOpenHelper(context, "stock_
         if (!tools) {
             issueSingle(db, false, itemId, quantity, date, workerId, notes, unitIds)
         } else {
-            val item = items(true).firstOrNull { it.id == itemId } ?: error("La herramienta ya no existe.")
-            item.policy.validateSelection(quantity, unitIds)
-            require(unitIds.all { id -> item.units.any { it.id == id } }) { "Seleccioná unidades de esta herramienta." }
-            val bundles = toolBundles().filter { it.unitIds.any { id -> id in unitIds } }
-            val expanded = (unitIds + bundles.flatMap { it.unitIds }).distinct()
-            val units = inventoryUnits(true, db).filter { it.id in expanded }
-            require(units.size == expanded.size && units.all { it.available }) { "No se puede prestar el conjunto: alguna herramienta no está disponible en el pañol." }
-            val movementIds = units.groupBy { it.itemId }.mapValues { (target, members) ->
-                issueSingle(db, true, target, members.size.toDouble(), date, workerId, notes, members.map { it.id })
-            }
-            bundles.forEach { bundle ->
-                val token = java.util.UUID.randomUUID().toString()
-                units.filter { it.id in bundle.unitIds }.forEach { unit ->
-                    db.execSQL("INSERT INTO prestamos_conjuntos VALUES (?, ?, ?)", arrayOf<Any>(movementIds.getValue(unit.itemId), unit.id, token))
-                }
+            issueTools(db, listOf(StockIssueLine(true, itemId, quantity, unitIds)), date, workerId, notes)
+        }
+    }
+
+    override fun issueForPersonnel(workerId: Long, date: String, notes: String, lines: List<StockIssueLine>) = transaction { db ->
+        require(lines.isNotEmpty()) { "Agregá al menos una herramienta o un material." }
+        require(lines.map { it.tools to it.itemId }.distinct().size == lines.size) { "Cada artículo debe aparecer una sola vez en la entrega." }
+        validateMovementDate(date)
+        require(personnel().any { it.id == workerId }) { "Seleccioná la persona que recibe." }
+        val tools = lines.filter { it.tools }
+        if (tools.isNotEmpty()) issueTools(db, tools, date, workerId, notes)
+        lines.filterNot { it.tools }.forEach { line ->
+            issueSingle(db, false, line.itemId, line.quantity, date, workerId, notes, line.unitIds)
+        }
+    }
+
+    private fun issueTools(db: SQLiteDatabase, lines: List<StockIssueLine>, date: String, workerId: Long, notes: String) {
+        val records = items(true)
+        lines.forEach { line ->
+            val item = records.firstOrNull { it.id == line.itemId } ?: error("La herramienta ya no existe.")
+            item.policy.validateSelection(line.quantity, line.unitIds)
+            require(line.unitIds.all { id -> item.units.any { it.id == id } }) { "Seleccioná unidades de esta herramienta." }
+        }
+        val selectedIds = lines.flatMap { it.unitIds }
+        val bundles = toolBundles().filter { it.unitIds.any { id -> id in selectedIds } }
+        val expanded = (selectedIds + bundles.flatMap { it.unitIds }).distinct()
+        val units = inventoryUnits(true, db).filter { it.id in expanded }
+        require(units.size == expanded.size && units.all { it.available }) { "No se puede prestar el conjunto: alguna herramienta no está disponible en el pañol." }
+        val movementIds = units.groupBy { it.itemId }.mapValues { (target, members) ->
+            issueSingle(db, true, target, members.size.toDouble(), date, workerId, notes, members.map { it.id })
+        }
+        bundles.forEach { bundle ->
+            val token = java.util.UUID.randomUUID().toString()
+            units.filter { it.id in bundle.unitIds }.forEach { unit ->
+                db.execSQL("INSERT INTO prestamos_conjuntos VALUES (?, ?, ?)", arrayOf<Any>(movementIds.getValue(unit.itemId), unit.id, token))
             }
         }
     }

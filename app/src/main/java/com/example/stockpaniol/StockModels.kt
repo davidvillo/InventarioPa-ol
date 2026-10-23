@@ -67,6 +67,33 @@ data class StockItem(val id: Long, val name: String, val quantity: Double, val u
 
 data class StockUnitEntry(val brand: String = "", val identifier: String = "")
 
+/** One article in a personnel delivery; tool and material IDs belong to separate stocks. */
+data class StockIssueLine(val tools: Boolean, val itemId: Long, val quantity: Double, val unitIds: List<Long> = emptyList())
+
+internal fun expandPersonnelIssueLines(lines: List<StockIssueLine>, tools: List<StockItem>): List<StockIssueLine> {
+    val units = tools.flatMap { it.units }
+    val selected = lines.filter { it.tools }.flatMap { it.unitIds }.toSet()
+    val bundles = units.filter { it.id in selected }.mapNotNull { it.bundleId }.toSet()
+    val expanded = units.filter { it.id in selected || it.bundleId != null && it.bundleId in bundles }
+        .groupBy { it.itemId }.map { (id, members) -> StockIssueLine(true, id, members.size.toDouble(), members.map { it.id }) }
+    val merged = (expanded + lines.filter { it.tools }).groupBy { it.itemId }.map { (id, rows) ->
+        val ids = rows.flatMap { it.unitIds }.distinct()
+        StockIssueLine(true, id, ids.size.toDouble(), ids)
+    }
+    return merged + lines.filterNot { it.tools }
+}
+
+internal fun removePersonnelIssueLine(lines: List<StockIssueLine>, target: StockIssueLine, tools: List<StockItem>): List<StockIssueLine> {
+    if (!target.tools) return lines.filterNot { !it.tools && it.itemId == target.itemId }
+    val units = tools.flatMap { it.units }
+    val bundles = units.filter { it.id in target.unitIds }.mapNotNull { it.bundleId }.toSet()
+    val removed = target.unitIds.toSet() + units.filter { it.bundleId != null && it.bundleId in bundles }.map { it.id }
+    return lines.mapNotNull { line ->
+        if (!line.tools) line else line.unitIds.filterNot { it in removed }.takeIf { it.isNotEmpty() }
+            ?.let { line.copy(quantity = it.size.toDouble(), unitIds = it) }
+    }
+}
+
 data class ToolUnitEdit(val id: Long, val brand: String, val identifier: String)
 data class ToolPurchaseEdit(val id: Long, val date: String, val receipt: String, val company: String)
 
