@@ -40,6 +40,7 @@ internal fun ToolEditDialog(itemId: Long, repository: StockRepository, onDismiss
     LaunchedEffect(Unit) {
         runCatching { withContext(Dispatchers.IO) { repository.stockOptions(StockCatalogueKind.BRAND) to repository.stockOptions(StockCatalogueKind.COMPANY) } }
             .onSuccess { brands = it.first; companies = it.second }
+            .onFailure { error = "No se pudieron cargar las marcas y empresas." }
     }
     LaunchedEffect(itemId) {
         if (draft != null) return@LaunchedEffect

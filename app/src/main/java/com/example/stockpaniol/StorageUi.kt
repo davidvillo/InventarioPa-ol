@@ -111,13 +111,17 @@ class StockStorageController(val manager: StockBackupManager) {
 @Composable
 fun StorageDialog(controller: StockStorageController, onDismiss: () -> Unit) {
     val state by controller.state.collectAsState()
+    var pickerError by rememberStockError()
     val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) controller.selectFolder(uri) }
     val file = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) controller.inspect(uri) }
     StockOverlay({ if (!state.busy) onDismiss() }) {
         Text("Almacenamiento", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("Guardá una copia antes de desinstalar o cambiar de versión. Incluye la base de datos y las fotos.")
         Text("Elegí una carpeta del almacenamiento interno, por ejemplo Documentos / Copias Stock Pañol. Sus copias se conservan al desinstalar la app.", style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(enabled = !state.busy, modifier = Modifier.fillMaxWidth(), onClick = { folder.launch(state.folder) }) {
+        OutlinedButton(enabled = !state.busy, modifier = Modifier.fillMaxWidth(), onClick = {
+            runCatching { folder.launch(state.folder) }
+                .onFailure { pickerError = "No se pudo abrir el selector de carpetas." }
+        }) {
             Text(if (state.folder == null) "Elegir carpeta de copias" else "Cambiar carpeta de copias")
         }
         state.folder?.let { Text("Carpeta: ${Uri.decode(it.lastPathSegment.orEmpty()).substringAfter(':')}", style = MaterialTheme.typography.bodySmall) }
@@ -125,7 +129,10 @@ fun StorageDialog(controller: StockStorageController, onDismiss: () -> Unit) {
         Row(Modifier.fillMaxWidth()) {
             OutlinedButton(enabled = !state.busy && state.folder != null, modifier = Modifier.weight(1f), onClick = controller::search) { Text("Buscar copias") }
             Spacer(Modifier.width(8.dp))
-            OutlinedButton(enabled = !state.busy, modifier = Modifier.weight(1f), onClick = { file.launch(arrayOf("application/zip", "application/octet-stream")) }) { Text("Abrir archivo") }
+            OutlinedButton(enabled = !state.busy, modifier = Modifier.weight(1f), onClick = {
+                runCatching { file.launch(arrayOf("application/zip", "application/octet-stream")) }
+                    .onFailure { pickerError = "No se pudo abrir el selector de archivos." }
+            }) { Text("Abrir archivo") }
         }
         Text("Después de reinstalar, elegí la carpeta anterior para buscar tus copias. La app comprueba que sean compatibles antes de restaurar.", style = MaterialTheme.typography.bodySmall)
         if (state.busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(state.progress) }
@@ -161,10 +168,14 @@ fun StockStorageGuard(repository: StockRepository, onRestored: () -> Unit, onOpe
     LaunchedEffect(state.restored) { if (handled != state.restored) { handled = state.restored; onRestored() } }
     val prefs = remember { app.getSharedPreferences("stock_storage", 0) }
     var recovery by remember { mutableStateOf(false) }
+    var recoveryError by rememberStockError()
+    StockErrorEffect(if (recovery) state.error else "", tag = "storage-recovery-error")
     LaunchedEffect(repository) {
         if (!prefs.getBoolean("recovery_seen", false)) {
             recovery = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                runCatching { repository.items(false).isEmpty() && repository.items(true).isEmpty() }.getOrDefault(true)
+                runCatching { repository.items(false).isEmpty() && repository.items(true).isEmpty() }
+                    .onFailure { recoveryError = "No se pudo consultar el stock. Podés recuperar una copia desde Almacenamiento." }
+                    .getOrDefault(true)
             }
             if (recovery && state.folder != null) controller.search()
         }

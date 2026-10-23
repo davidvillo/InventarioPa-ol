@@ -35,6 +35,31 @@ class StockErrorsUiTest {
         compose.onNodeWithTag("transient-error").assertExists()
     }
 
+    @Test fun errorHasItsOwnWindowAboveAnOpenForm() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent { MaterialTheme {
+            var error by rememberStockError()
+            StockOverlay({}) {
+                Button(onClick = { error = "Error sobre el formulario" }) { Text("Validar formulario") }
+            }
+        } }
+        compose.onNodeWithText("Validar formulario").performClick()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithTag("transient-error").assertIsDisplayed()
+            .assert(hasAnyAncestor(isDialog()))
+        val windowBounds = compose.onNodeWithTag("transient-error-window").fetchSemanticsNode().boundsInRoot
+        val noticeBounds = compose.onNodeWithTag("transient-error").fetchSemanticsNode().boundsInRoot
+        assertEquals(windowBounds.center.x, noticeBounds.center.x, 1f)
+        assertTrue(noticeBounds.top > windowBounds.height * 0.5f)
+        assertTrue(noticeBounds.bottom < windowBounds.height * 0.9f)
+        // The notice must let taps through to the form, including repeated attempts.
+        compose.onNodeWithText("Validar formulario").performClick()
+        compose.mainClock.advanceTimeBy(1_800)
+        compose.onNodeWithTag("transient-error").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithTag("transient-error").assertDoesNotExist()
+    }
+
     @Test fun missingPersonnelOnAnIssueShowsTheErrorWithoutSavingTheIssue() {
         val context = isolatedStockContext("missing_person_error_")
         val r = LocalStockRepository(context)
@@ -48,5 +73,22 @@ class StockErrorsUiTest {
             assertEquals(1, r.movements(false).size)
             assertEquals(4.0, r.items(false).single().quantity, 0.0)
         } finally { r.close(); context.deleteDatabase("stock_paniol.db") }
+    }
+
+    @Test fun catalogueLoadFailuresUseTheSameFloatingErrorWindow() {
+        val context = isolatedStockContext("catalogue_error_")
+        val local = LocalStockRepository(context)
+        val failing = object : StockRepository by local {
+            override fun stockOptions(kind: StockCatalogueKind, includeInactive: Boolean): List<StockCatalogueOption> {
+                throw IllegalStateException("Fallo de lectura de prueba")
+            }
+        }
+        try {
+            compose.setContent { MaterialTheme { StockCatalogueSettingsDialog(failing, StockCatalogueKind.BRAND, {}) } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("No se pudo cargar la lista.").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("No se pudo cargar la lista.").assertIsDisplayed()
+                .assert(hasAnyAncestor(isDialog()))
+            compose.onNodeWithTag("transient-error-window").assertExists()
+        } finally { local.close(); context.deleteDatabase("stock_paniol.db") }
     }
 }

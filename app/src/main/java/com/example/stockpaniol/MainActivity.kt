@@ -380,9 +380,11 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
     var measures by remember { mutableStateOf(emptyList<MeasurementUnit>()) }
     var brands by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
     var companies by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
+    var error by rememberStockError()
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { Triple(repository.measurements(true), repository.stockOptions(StockCatalogueKind.BRAND), repository.stockOptions(StockCatalogueKind.COMPANY)) }
-            .let { measures = it.first; brands = it.second; companies = it.third }
+        runCatching { withContext(Dispatchers.IO) { Triple(repository.measurements(true), repository.stockOptions(StockCatalogueKind.BRAND), repository.stockOptions(StockCatalogueKind.COMPANY)) } }
+            .onSuccess { measures = it.first; brands = it.second; companies = it.third }
+            .onFailure { error = "No se pudieron cargar las unidades, marcas y empresas." }
     }
     var receipt by rememberSaveable { mutableStateOf("no hay") }
     var date by rememberSaveable { mutableStateOf(todayStockDate()) }
@@ -398,7 +400,6 @@ private fun EntryDialog(tools: Boolean, records: List<StockItem>, repository: St
     var rented by rememberSaveable { mutableStateOf(false) }
     var image by rememberSaveable { mutableStateOf("") }
     var materialType by rememberSaveable { mutableStateOf(MaterialTypes.CONSTRUCTION) }
-    var error by rememberStockError()
     var busy by remember { mutableStateOf(false) }
     val individual = tools || if (existing) selected?.individuallyTracked == true else individualMaterial
     val countingUnit = measures.firstOrNull { it.counting }?.name ?: "unidades"

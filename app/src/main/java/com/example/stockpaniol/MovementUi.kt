@@ -262,10 +262,13 @@ private fun IdentifyUnitDialog(tools: Boolean, unit: InventoryUnit, repository: 
     val scope = rememberCoroutineScope()
     var brand by rememberSaveable(unit.id) { mutableStateOf(unit.brand) }
     var brands by remember { mutableStateOf(emptyList<StockCatalogueOption>()) }
-    LaunchedEffect(Unit) { runCatching { withContext(Dispatchers.IO) { repository.stockOptions(StockCatalogueKind.BRAND) } }.onSuccess { brands = it } }
+    var error by rememberStockError()
+    LaunchedEffect(Unit) {
+        runCatching { withContext(Dispatchers.IO) { repository.stockOptions(StockCatalogueKind.BRAND) } }
+            .onSuccess { brands = it }.onFailure { error = "No se pudieron cargar las marcas." }
+    }
     var identifier by rememberSaveable(unit.id) { mutableStateOf(unit.identifier) }
     var busy by remember { mutableStateOf(false) }
-    var error by rememberStockError()
     AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("Identificar unidad") }, text = {
         Column {
             StockCatalogueField("Marca", brand, brands, !busy) { brand = it }
